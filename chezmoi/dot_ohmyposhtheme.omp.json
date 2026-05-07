@@ -1,0 +1,90 @@
+{
+  "$schema": "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json",
+  "blocks": [
+    {
+      "type": "prompt",
+      "alignment": "left",
+      "segments": [
+        {
+          "properties": {
+            "cache_duration": "none",
+            "display_host": false,
+            "prefix": "\uebc6 "
+          },
+          "template": "{{ .UserName }}",
+          "foreground": "lightYellow",
+          "type": "session",
+          "style": "plain"
+        },
+        {
+          "properties": {
+            "cache_duration": "none"
+          },
+          "template": " in ",
+          "foreground": "white",
+          "type": "text",
+          "style": "plain"
+        },
+        {
+          "properties": {
+            "cache_duration": "none",
+            "prefix": "\uea83 ",
+            "style": "folder"
+          },
+          "template": "{{ .Path }}",
+          "foreground": "cyan",
+          "type": "path",
+          "style": "plain"
+        },
+        {
+          "properties": {
+            "cache_duration": "none",
+            "prefix": " (",
+            "suffix": ")"
+          },
+          "foreground": "green",
+          "type": "python_venv",
+          "style": "plain"
+        },
+        {
+          "properties": {
+            "cache_duration": "none"
+          },
+          "template": " on ",
+          "foreground": "white",
+          "type": "text",
+          "style": "plain"
+        },
+        {
+          "properties": {
+            "branch_icon": "\ue0a0 ",
+            "cache_duration": "none",
+            "fetch_stash_count": false
+          },
+          "template": "{{ .HEAD }}",
+          "foreground": "#ff94df",
+          "type": "git",
+          "style": "plain"
+        }
+      ]
+    },
+    {
+      "type": "prompt",
+      "alignment": "left",
+      "segments": [
+        {
+          "properties": {
+            "cache_duration": "none"
+          },
+          "template": "❯",
+          "foreground": "lightGreen",
+          "type": "text",
+          "style": "plain"
+        }
+      ],
+      "newline": true
+    }
+  ],
+  "version": 3,
+  "final_space": true
+}

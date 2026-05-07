@@ -1,0 +1,27 @@
+---
+- hosts: localhost
+  connection: local
+  tasks:
+    - name: Import universal tasks
+      import_tasks: common.yaml
+
+    ### OMARCHY-SPECIFIC PACKAGES ###
+    # Target distro-specific packages unavailable via generic package module.
+
+    - name: Install Omarchy-specific packages
+      pacman:
+        name:
+          # omarchy utilities go here
+        state: present
+      become: yes
+
+    ### AUR PACKAGES (yay) ###
+    # Ansible lacks native AUR support. Execute yay via shell with '--needed' to prevent redundant reinstalls.
+
+    - name: Install AUR packages via yay
+      shell: yay -S --needed --noconfirm {{ aur_packages | join(' ') }}
+      vars:
+        aur_packages: []
+      when: aur_packages | length > 0
+      become: yes
+      become_user: aur_builder

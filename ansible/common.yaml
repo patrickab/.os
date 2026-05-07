@@ -1,0 +1,77 @@
+---
+# Dotfile Hooks
+
+- name: Source bashrc_appendix in ~/.bashrc
+  lineinfile:
+    path: "{{ ansible_facts['env']['HOME'] }}/.bashrc"
+    line: '[[ -f "$HOME/.bashrc_appendix" ]] && source "$HOME/.bashrc_appendix"'
+    state: present
+    create: yes
+  become: no
+
+# System Packages (cross-distro)
+# Autodetect host package manager (apt/pacman) for cross-distro compatibility.
+
+- name: Install universal system packages
+  package:
+    name:
+      - git
+      - tmux
+      - htop
+      - curl
+      - wget
+    state: present
+  become: yes
+
+### Curl Installables ###
+# Use vendor scripts directly to avoid complex Homebrew bootstrapping dependencies (like ruby-erb/gcc) on minimal distros.
+# Require 'creates:' argument to skip execution if binary exists, preserving idempotency.
+
+- name: Install Oh My Posh
+  shell: curl -fsSL https://ohmyposh.dev/install.sh | bash -s -- -d /usr/local/bin
+  args:
+    creates: "/usr/local/bin/oh-my-posh"
+  become: yes
+
+- name: Install kitty
+  shell: curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n dest=/opt
+  args:
+    creates: "/opt/kitty.app/bin/kitty"
+  become: yes
+
+- name: Expose kitty on PATH
+  file:
+    src: "/opt/kitty.app/bin/kitty"
+    dest: "/usr/local/bin/kitty"
+    state: link
+    force: yes
+  become: yes
+
+# Extract directly to /usr/local/share/fonts for declarative OS-agnostic fallback.
+- name: Install Nerd Fonts
+  shell: curl -fsSL https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip -o /opt/FiraCode.zip && mkdir -p /usr/local/share/fonts && unzip -o /opt/FiraCode.zip -d /usr/local/share/fonts && fc-cache -fv && rm /opt/FiraCode.zip
+  args:
+    creates: "/usr/local/share/fonts/FiraCodeNerdFont-Regular.ttf"
+  become: yes
+
+- name: Install opencode
+  shell: curl -fsSL https://opencode.ai/install | HOME=/root bash && cp /root/.opencode/bin/opencode /usr/local/bin/opencode
+  args:
+    creates: "/usr/local/bin/opencode"
+  become: yes
+
+- name: Install Atuin
+  shell: curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/atuinsh/atuin/main/install.sh | HOME=/root sh -s -- --non-interactive && cp /root/.atuin/bin/atuin /usr/local/bin/atuin
+  args:
+    creates: "/usr/local/bin/atuin"
+  become: yes
+
+# Flatpak Packages
+# Provide sandboxed, dependency-free GUI installations across distros.
+
+- name: Install flatpak packages
+  flatpak:
+    name:
+      - md.obsidian.Obsidian
+    state: present
+  become: no

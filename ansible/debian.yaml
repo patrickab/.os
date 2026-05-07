@@ -1,0 +1,15 @@
+---
+- hosts: localhost
+  connection: local
+  tasks:
+    - name: Import universal tasks
+      import_tasks: common.yaml
+
+    ### DEBIAN-SPECIFIC PACKAGES ###
+
+    - name: Install Debian-specific packages
+      apt:
+        name:
+          # debian utilities go here
+        state: present
+      become: yes

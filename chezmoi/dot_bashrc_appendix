@@ -1,0 +1,48 @@
+# API-keys
+[ -f ~/.secrets ] && source ~/.secrets
+
+alias ls='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto'
+alias tree='ls --tree -I "__pycache__"'
+alias python='python3'
+
+# Restrict GPU access
+alias code="code --disable-gpu"
+alias obsidian="obsidian --disable-gpu"
+
+cd ()
+{
+    builtin cd "$@";
+    ls
+}
+
+search ()
+{
+    if [ -z "$1" ]; then
+        echo "Usage: ${FUNCNAME[0]} '<search_string>'" 1>&2;
+        return 1;
+    fi;
+    grep --color=auto -rnH -I "$1" .
+}
+
+function yy() {
+        local tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+        yazi "$@" --cwd-file="$tmp"
+        if cwd="$(cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+                cd -- "$cwd"
+        fi
+        rm -f -- "$tmp"
+}
+export OLLAMA_API_BASE=http://127.0.0.1:11434
+export SECURE_LOOPBACK_IP="10.200.200.1"
+# User Settings
+export TERMINAL="kitty"
+export UV_PROJECT_ENVIRONMENT=".venv"
+
+# Homebrew & Atuin
+export PATH="$HOME/.local/bin:$PATH"
+
+# --- Oh My Posh (Prompt) ---
+# Initialize Oh My Posh if installed
+eval "$(oh-my-posh init bash --config ~/.ohmyposhtheme.omp.json)"
+
+eval "$(atuin init bash)"
