@@ -1,31 +1,42 @@
-# Dotfiles
+# OS Setup Dotfiles
 
-## Deployment pipeline
+For personal use. Stateless, declarative, cross-distro provisioning with automatic version control.
 
+## Usage
+
+Single command bootstraps entire system: installs prerequisites, provisions packages, deploys dotfiles.
+
+```bash
+./setup.sh
 ```
-dot_<name>  --chezmoi-->  .<name>  --ansible-->  wired into shell rc files
-```
 
-1. **Chezmoi** maps `dot_` prefix → `.` for a single path component.
-   - `dot_bashrc_appendix` → `~/.bashrc_appendix` (file)
-   - `dot_config/fish/` → `~/.config/fish/` (directory; `dot_` only applies to the `config` component)
+## Key Benefits
 
-2. **Ansible** idempotently injects `source` lines into shell rc files (e.g. `~/.bashrc`).
+- ✅ **Reproducible Environments** - Fresh machine becomes ready in a single command.
+- ✅ **Automatic Updates** - No static binary rot. brew/flaptpak update all software (CLI/GUI) in one command.
+- ✅ **Cross-Distro Compatibility** - Same setup works on any Linux distribution.
+- ✅ **Declarative Configuration** - System state defined in code, not manual commands.
+- ✅ **Idempotent Provisioning** - Safe to re-run. Already-installed packages skip automatically.
+- ✅ **Rollback Capability** - Package managers track installations. Uninstall cleanly if needed.
+- ✅ **Dependency Management** - Homebrew/Flatpak handle transitive dependencies automatically.
+- ✅ **Secrets Management** - Chezmoi encrypts sensitive data (API keys, tokens) in dotfiles.
 
-3. **Ordering**: `~/.bashrc` sources Omarchy defaults first, then dotfiles rc, then appendix last.
-   Appendix aliases always win because they're sourced last.
+## Stack
 
-## Adding shell customization
+- **Ansible** — declarative package management (apt/pacman/dnf autodetected via `package` module)
+- **Homebrew** — CLI tools with `brew upgrade` for updates, identical versions cross-distro
+- **Flatpak** — sandboxed GUI apps, distro-agnostic
+- **Chezmoi** — dotfile templating and secrets (maps `dot_` to `.`)
 
-1. Create `dot_bashrc_appendix` (or `dot_fish_appendix`, etc.) in the appropriate dir.
-2. Ansible wiring is already in place — the file just needs to exist.
-3. Run chezmoi apply to deploy.
+## Design
 
-## Provisioning Architecture
+- **CLI via Homebrew** — avoids `curl | bash` static binary rot; `brew upgrade` handles all updates
+- **GUI via Flatpak** — sandboxed, dependency-free, works on immutable distros
+- **Core tools via system pkg manager** — git, tmux, htop, kitty stay native
+- **Fonts via Homebrew Casks** — user-space install to `~/.local/share/fonts`
 
-- **Tooling Split**: Ansible handles system state/packages. Chezmoi manages personal dotfiles/secrets.
-- **Native Packages**: Ansible `package` module autodetects apt/pacman/dnf for cross-distro compatibility.
-- **Homebrew**: Manages CLI utilities to prevent static binary rot (update trap).
-- **Direct Extraction**: OS-agnostic declarative fallback for fonts (bypasses macOS-only Casks).
-- **Vendor Scripts**: Last resort for missing tools. Idempotency enforced via `creates: /path/to/binary`.
-- **Flatpak**: Consistent, sandboxed GUI application installations across distros.
+All tasks are idempotent — safe to re-run. Same playbook works on Arch, Debian, Fedora, Ubuntu without modification.
+
+## Customization
+
+Add `dot_bashrc_appendix` to chezmoi directory, then `chezmoi apply`.

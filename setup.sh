@@ -11,12 +11,12 @@ if [ -f /etc/debian_version ]; then
     TARGET_OS="debian"
     echo "==> Detected Debian — installing prerequisites..."
     sudo apt update
-    sudo apt install -y curl git python3-pip
+    sudo apt install -y curl git python3-pip build-essential procps file
     pip3 install --user ansible
 elif [ -f /etc/arch-release ]; then
     TARGET_OS="omarchy"
     echo "==> Detected Arch/Omarchy — installing prerequisites..."
-    sudo pacman -Syu --noconfirm --needed ansible curl git flatpak
+    sudo pacman -Syu --noconfirm --needed ansible curl git flatpak base-devel procps-ng file ruby-erb
 else
     echo "Unsupported OS"; exit 1
 fi

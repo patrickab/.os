@@ -20,51 +20,61 @@
       - htop
       - curl
       - wget
+      - kitty
     state: present
   become: yes
 
-### Curl Installables ###
-# Use vendor scripts directly to avoid complex Homebrew bootstrapping dependencies (like ruby-erb/gcc) on minimal distros.
-# Require 'creates:' argument to skip execution if binary exists, preserving idempotency.
+# Homebrew Setup & Packages
+# Prevent static binary rot via Homebrew. Ensure distro-agnostic user-space installation and automatic updates.
 
-- name: Install Oh My Posh
-  shell: curl -fsSL https://ohmyposh.dev/install.sh | bash -s -- -d /usr/local/bin
-  args:
-    creates: "/usr/local/bin/oh-my-posh"
-  become: yes
-
-- name: Install kitty
-  shell: curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n dest=/opt
-  args:
-    creates: "/opt/kitty.app/bin/kitty"
-  become: yes
-
-- name: Expose kitty on PATH
+- name: Pre-create Homebrew directories with proper permissions
   file:
-    src: "/opt/kitty.app/bin/kitty"
-    dest: "/usr/local/bin/kitty"
-    state: link
-    force: yes
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ansible_facts['user_id'] }}"
+    group: "{{ ansible_facts['user_id'] }}"
+    mode: '0755'
+  loop:
+    - /home/linuxbrew
+    - /home/linuxbrew/.linuxbrew
   become: yes
 
-# Extract directly to /usr/local/share/fonts for declarative OS-agnostic fallback.
-- name: Install Nerd Fonts
-  shell: curl -fsSL https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip -o /opt/FiraCode.zip && mkdir -p /usr/local/share/fonts && unzip -o /opt/FiraCode.zip -d /usr/local/share/fonts && fc-cache -fv && rm /opt/FiraCode.zip
-  args:
-    creates: "/usr/local/share/fonts/FiraCodeNerdFont-Regular.ttf"
-  become: yes
+- name: Check if Homebrew is installed
+  stat:
+    path: /home/linuxbrew/.linuxbrew/bin/brew
+  register: brew_check
 
-- name: Install opencode
-  shell: curl -fsSL https://opencode.ai/install | HOME=/root bash && cp /root/.opencode/bin/opencode /usr/local/bin/opencode
-  args:
-    creates: "/usr/local/bin/opencode"
-  become: yes
+- name: Install Homebrew
+  shell: NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  when: not brew_check.stat.exists
+  become: no
 
-- name: Install Atuin
-  shell: curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/atuinsh/atuin/main/install.sh | HOME=/root sh -s -- --non-interactive && cp /root/.atuin/bin/atuin /usr/local/bin/atuin
-  args:
-    creates: "/usr/local/bin/atuin"
-  become: yes
+- name: Tap oh-my-posh repository
+  community.general.homebrew_tap:
+    name: jandedobbeleer/oh-my-posh
+    state: present
+    path: /home/linuxbrew/.linuxbrew/bin
+  become: no
+
+- name: Install CLI tools via Homebrew
+  community.general.homebrew:
+    name:
+      - jandedobbeleer/oh-my-posh/oh-my-posh
+      - atuin
+      - opencode
+    state: latest
+    path: /home/linuxbrew/.linuxbrew/bin
+  become: no
+
+- name: Install fonts via Homebrew
+  community.general.homebrew_cask:
+    name:
+      - font-fira-code-nerd-font
+    state: latest
+    path: /home/linuxbrew/.linuxbrew/bin
+  become: no
+
+### System Binaries ###
 
 # Flatpak Packages
 # Provide sandboxed, dependency-free GUI installations across distros.

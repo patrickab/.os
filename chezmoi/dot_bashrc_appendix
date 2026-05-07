@@ -21,7 +21,11 @@ search ()
         echo "Usage: ${FUNCNAME[0]} '<search_string>'" 1>&2;
         return 1;
     fi;
-    grep --color=auto -rnH -I "$1" .
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git ls-files --cached --others --exclude-standard -z | xargs -0r grep --color=auto -nH -I -- "$1"
+    else
+        grep --color=auto -rnH -I -- "$1" .
+    fi
 }
 
 function yy() {
@@ -39,7 +43,8 @@ export TERMINAL="kitty"
 export UV_PROJECT_ENVIRONMENT=".venv"
 
 # Homebrew & Atuin
-export PATH="$HOME/.local/bin:$PATH"
+[ -f /home/linuxbrew/.linuxbrew/bin/brew ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+export PATH="/home/linuxbrew/.linuxbrew/bin:$HOME/.local/bin:$PATH"
 
 # --- Oh My Posh (Prompt) ---
 # Initialize Oh My Posh if installed
