@@ -63,6 +63,7 @@
       - jandedobbeleer/oh-my-posh/oh-my-posh
       - atuin
       - opencode
+      - ollama
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
