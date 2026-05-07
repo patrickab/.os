@@ -21,6 +21,7 @@
       - curl
       - wget
       - kitty
+      - xclip
     state: present
   become: yes
 
