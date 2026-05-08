@@ -5,9 +5,98 @@
     - name: Import universal tasks
       import_tasks: common.yaml
 
-    ### OMARCHY-SPECIFIC PACKAGES ###
-    # Target distro-specific packages unavailable via generic package module.
+    # Packages
+    - name: Remove unwanted pacman packages
+      pacman:
+        name:
+          - alacritty
+          - gnome-calculator
+          - signal-desktop
+          - easyeffects
+          - pinta
+          - libreoffice-fresh
+          - typora
+        state: absent
+      become: yes
 
+    # Config dirs
+    - name: Remove unwanted config directories
+      file:
+        path: "{{ ansible_facts['env']['HOME'] }}/.config/{{ item }}"
+        state: absent
+      loop:
+        - alacritty
+        - easyeffects
+        - easyeffects
+        - Typora
+
+    # Data / cache dirs
+    - name: Remove unwanted data directories
+      file:
+        path: "{{ ansible_facts['env']['HOME'] }}/{{ item }}"
+        state: absent
+      loop:
+        - .cache/easyeffects
+        - .local/share/easyeffects
+        - .local/share/omarchy/config/Typora
+
+    # Desktop entries
+    - name: Remove unwanted user desktop entries
+      file:
+        path: "{{ ansible_facts['env']['HOME'] }}/.local/share/applications/{{ item }}.desktop"
+        state: absent
+      loop:
+        - Alacritty
+        - ChatGPT
+        - YouTube
+        - X
+        - Figma
+        - Fizzy
+        - Google Contacts
+        - Google Maps
+        - Google Messages
+        - Google Photos
+        - typora
+
+    # Desktop icons
+    - name: Remove unwanted user desktop icons
+      file:
+        path: "{{ ansible_facts['env']['HOME'] }}/.local/share/applications/icons/{{ item }}.png"
+        state: absent
+      loop:
+        - ChatGPT
+        - Figma
+        - Fizzy
+        - Google Contacts
+        - Google Maps
+        - Google Messages
+        - Google Photos
+        - YouTube
+        - X
+
+    # Hyprland bindings
+    - name: Remove dead hyprland bindings
+      lineinfile:
+        path: "{{ ansible_facts['env']['HOME'] }}/.config/hypr/bindings.conf"
+        regexp: '{{ item }}'
+        state: absent
+      loop:
+        - 'Signal, exec'
+        - 'Typora, exec'
+        - 'chatgpt\.com'
+        - 'youtube\.com'
+        - 'x\.com'
+        - 'Google Messages'
+        - 'Google Photos'
+
+    # Waybar (alacritty → kitty+htop)
+    - name: Replace alacritty with kitty+htop on waybar cpu right-click
+      lineinfile:
+        path: "{{ ansible_facts['env']['HOME'] }}/.config/waybar/config.jsonc"
+        regexp: '"on-click-right": "alacritty"'
+        line: '        "on-click-right": "kitty htop"'
+
+    # Omarchy-specific packages
     - name: Install Omarchy-specific packages
       pacman:
         name:
@@ -15,9 +104,7 @@
         state: present
       become: yes
 
-    ### AUR PACKAGES (yay) ###
-    # Ansible lacks native AUR support. Execute yay via shell with '--needed' to prevent redundant reinstalls.
-
+    # AUR packages (yay)
     - name: Install AUR packages via yay
       shell: yay -S --needed --noconfirm {{ aur_packages | join(' ') }}
       vars:
