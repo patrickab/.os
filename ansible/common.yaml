@@ -60,6 +60,7 @@
 - name: Install CLI tools via Homebrew
   community.general.homebrew:
     name:
+      - uv
       - jandedobbeleer/oh-my-posh/oh-my-posh
       - atuin
       - opencode
