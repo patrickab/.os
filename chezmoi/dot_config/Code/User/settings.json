@@ -1,0 +1,22 @@
+{
+    "github.copilot.nextEditSuggestions.enabled": true,
+    "[cpp]": {
+        "editor.wordBasedSuggestions": "off",
+        "editor.semanticHighlighting.enabled": true,
+        "editor.stickyScroll.defaultModel": "foldingProviderModel",
+        "editor.suggest.insertMode": "replace"
+    },
+    "github.copilot.enable": {
+        "*": true,
+        "plaintext": false,
+        "markdown": false,
+        "scminput": false
+    },
+    "git.autofetch": true,
+    "terminal.integrated.gpuAcceleration": "off",
+    "python.defaultInterpreterPath": "/home/noob/TUM_26_SoSe/Advanced-DL-4-Physics/.venv",
+    "jupyter.widgetScriptSources": [
+        "jsdelivr.com",
+        "unpkg.com"
+    ]
+}

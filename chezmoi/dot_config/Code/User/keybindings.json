@@ -1,0 +1,22 @@
+[
+    {
+        "key": "ctrl+o",
+        "command": "-workbench.action.files.openFile",
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "ctrl+o",
+        "command": "workbench.action.quickOpen",
+        "when": "editorTextFocus || explorerViewletVisible"
+    },
+    {
+        "key": "ctrl+tab",
+        "command": "workbench.action.nextEditor",
+        "when": "editorTextFocus || explorerViewletVisible"
+    },
+    {
+        "key": "ctrl+shift+tab",
+        "command": "workbench.action.previousEditor",
+        "when": "editorTextFocus || explorerViewletVisible"
+    }
+]
