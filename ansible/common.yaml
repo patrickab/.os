@@ -66,6 +66,13 @@
       - opencode
       - ollama
       - yazi
+      - neovim
+      - ripgrep
+      - fd
+      - fzf
+      - bat
+      - eza
+      - zoxide
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
