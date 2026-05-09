@@ -107,11 +107,8 @@
         state: present
       become: yes
 
-    # AUR packages (yay)
-    - name: Install AUR packages via yay
-      shell: yay -S --needed --noconfirm {{ aur_packages | join(' ') }}
-      vars:
-        aur_packages: []
-      when: aur_packages | length > 0
-      become: yes
-      become_user: aur_builder
+    # WiFi captive portal setup
+    - name: Run wifi redirect setup
+      ansible.builtin.shell: "{{ ansible_facts['env']['HOME'] }}/.os/ansible/omarchy/setup_wifi_redirect.sh"
+      args:
+        creates: "{{ ansible_facts['env']['HOME'] }}/.local/bin/captive-browser"
