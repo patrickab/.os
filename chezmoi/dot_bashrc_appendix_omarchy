@@ -1,0 +1,22 @@
+function zoom() {
+  local scale="$1"
+  local chezmoi_file="$HOME/.os/chezmoi/dot_config/hypr/monitors.conf"
+  local config_file="$HOME/.config/hypr/monitors.conf"
+  if [[ -z $scale ]]; then
+    local current
+    current=$(grep -oP '^\$ZOOM_SCALE\s*=\s*\K[\d.]+' "$chezmoi_file" 2>/dev/null)
+    echo "Usage: zoom <scale>  (current: ${current:-unknown})" >&2
+    return 1
+  fi
+  if [[ ! $scale =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "zoom: scale must be a number (e.g. 1.0, 1.5, 2.0)" >&2
+    return 1
+  fi
+  sed -i "s/^\$ZOOM_SCALE = .*/\$ZOOM_SCALE = $scale/" "$chezmoi_file"
+  cp "$chezmoi_file" "$config_file"
+  if hyprctl monitors &>/dev/null 2>&1; then
+    while IFS= read -r monitor; do
+      hyprctl keyword monitor "${monitor},preferred,auto,${scale}"
+    done < <(hyprctl monitors | grep '^Monitor' | awk '{print $2}')
+  fi
+}

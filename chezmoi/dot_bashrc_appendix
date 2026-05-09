@@ -51,3 +51,5 @@ export PATH="/home/linuxbrew/.linuxbrew/bin:$HOME/.local/bin:$PATH"
 eval "$(oh-my-posh init bash --config ~/.ohmyposhtheme.omp.json)"
 
 eval "$(atuin init bash)"
+
+[[ -f ~/.bashrc_appendix_omarchy ]] && source ~/.bashrc_appendix_omarchy
