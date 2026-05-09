@@ -103,8 +103,11 @@
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
 
-- name: Import bash history into atuin
-  shell: atuin import bash
+- name: Download bash-preexec for atuin
+  get_url:
+    url: https://raw.githubusercontent.com/rcaloras/bash-preexec/master/bash-preexec.sh
+    dest: "{{ ansible_facts['env']['HOME'] }}/.bash-preexec.sh"
+    mode: '0644'
   become: no
 
 - name: Install fonts via Homebrew

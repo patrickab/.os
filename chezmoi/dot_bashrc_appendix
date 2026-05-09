@@ -50,6 +50,7 @@ export PATH="/home/linuxbrew/.linuxbrew/bin:$HOME/.local/bin:$PATH"
 # Initialize Oh My Posh if installed
 eval "$(oh-my-posh init bash --config ~/.ohmyposhtheme.omp.json)"
 
+[[ -f ~/.bash-preexec.sh ]] && source ~/.bash-preexec.sh
 eval "$(atuin init bash)"
 
 [[ -f ~/.bashrc_appendix_omarchy ]] && source ~/.bashrc_appendix_omarchy
