@@ -10,11 +10,13 @@
       pacman:
         name:
           - alacritty
+          - chromium
           - gnome-calculator
           - signal-desktop
           - easyeffects
           - pinta
           - libreoffice-fresh
+          - obsidian
           - typora
         state: absent
       become: yes
@@ -26,7 +28,7 @@
         state: absent
       loop:
         - alacritty
-        - easyeffects
+        - chromium
         - easyeffects
         - Typora
 
@@ -37,6 +39,7 @@
         state: absent
       loop:
         - .cache/easyeffects
+        - .cache/chromium
         - .local/share/easyeffects
         - .local/share/omarchy/config/Typora
 
