@@ -103,6 +103,10 @@
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
 
+- name: Import bash history into atuin
+  shell: atuin import bash
+  become: no
+
 - name: Install fonts via Homebrew
   community.general.homebrew_cask:
     name:
