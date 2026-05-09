@@ -8,8 +8,8 @@ set -e
 echo "==> Adding linux-surface GPG key..."
 curl -s https://raw.githubusercontent.com/linux-surface/linux-surface/master/pkg/keys/surface.asc \
   | sudo pacman-key --add -
-sudo pacman-key --finger 56C464BAEDCE6E6E
-sudo pacman-key --lsign-key 56C464BAEDCE6E6E
+sudo pacman-key --finger 56C464BAAC421453
+sudo pacman-key --lsign-key 56C464BAAC421453
 
 echo "==> Adding linux-surface repository..."
 if ! grep -q "\[linux-surface\]" /etc/pacman.conf; then
@@ -31,6 +31,9 @@ if [ -n "$IPTSD_DEVICE" ]; then
 else
   echo "    iptsd device not found - will be started automatically by udev on next boot"
 fi
+
+echo "==> Removing libwacom (conflicts with libwacom-surface)..."
+sudo pacman -Rdd --noconfirm libwacom 2>/dev/null || true
 
 echo "==> Installing libwacom-surface and surface-control from AUR..."
 yay -S --needed --noconfirm libwacom-surface surface-control
