@@ -16,7 +16,7 @@ function zoom() {
   cp "$chezmoi_file" "$config_file"
   if hyprctl monitors &>/dev/null 2>&1; then
     while IFS= read -r monitor; do
-      hyprctl keyword monitor "${monitor},preferred,auto,${scale}"
+      hyprctl keyword monitor "${monitor},preferred,auto,${scale}" >/dev/null
     done < <(hyprctl monitors | grep '^Monitor' | awk '{print $2}')
   fi
 }
