@@ -37,4 +37,9 @@ ansible-playbook ~/.os/ansible/${TARGET_OS}.yaml --ask-become-pass
 echo "==> Applying chezmoi dotfiles..."
 "$CHEZMOI_BIN" init --source ~/.os/chezmoi --working-tree ~/.os --apply
 
+if command -v omarchy &> /dev/null; then
+    echo "==> Setting wallpaper..."
+    omarchy theme bg set ~/.os/assets/wallpaper.png || true
+fi
+
 echo "==> Done."
