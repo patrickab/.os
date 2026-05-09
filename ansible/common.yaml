@@ -88,6 +88,7 @@
     name:
       - uv
       - jandedobbeleer/oh-my-posh/oh-my-posh
+      - bash-preexec
       - atuin
       - opencode
       - ollama
@@ -101,13 +102,6 @@
       - zoxide
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
-  become: no
-
-- name: Download bash-preexec for atuin
-  get_url:
-    url: https://raw.githubusercontent.com/rcaloras/bash-preexec/master/bash-preexec.sh
-    dest: "{{ ansible_facts['env']['HOME'] }}/.bash-preexec.sh"
-    mode: '0644'
   become: no
 
 - name: Install fonts via Homebrew

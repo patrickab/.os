@@ -50,7 +50,7 @@ export PATH="/home/linuxbrew/.linuxbrew/bin:$HOME/.local/bin:$PATH"
 # Initialize Oh My Posh if installed
 eval "$(oh-my-posh init bash --config ~/.ohmyposhtheme.omp.json)"
 
-[[ -f ~/.bash-preexec.sh ]] && source ~/.bash-preexec.sh
+[[ -f /home/linuxbrew/.linuxbrew/etc/profile.d/bash-preexec.sh ]] && source /home/linuxbrew/.linuxbrew/etc/profile.d/bash-preexec.sh
 eval "$(atuin init bash)"
 
 export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
