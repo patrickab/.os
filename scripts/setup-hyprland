@@ -1,0 +1,186 @@
+#!/bin/bash
+set -euo pipefail
+
+echo "==> Setting up Hyprland on Debian/Ubuntu/Pop!_OS..."
+
+if [ -z "${SUDO_PASSWORD:-}" ]; then
+    read -rsp "Enter sudo password: " SUDO_PASSWORD
+    echo
+    if ! echo "$SUDO_PASSWORD" | sudo -S -v 2>/dev/null; then
+        echo "ERROR: Invalid sudo password."
+        exit 1
+    fi
+fi
+
+run_sudo() {
+    if [ -n "${SUDO_PASSWORD:-}" ]; then
+        echo "$SUDO_PASSWORD" | sudo -S "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+if command -v Hyprland &> /dev/null; then
+    echo "==> Hyprland already installed ($(Hyprland --version 2>/dev/null || echo unknown))"
+    echo "    Nothing to do."
+    exit 0
+fi
+
+echo "==> Installing build dependencies..."
+export PATH="/usr/bin:$PATH"
+export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+run_sudo apt update
+run_sudo apt install -y \
+    build-essential cmake meson ninja-build pkg-config \
+    libwayland-dev wayland-protocols libwayland-egl1 \
+    libinput-dev libxkbcommon-dev libpixman-1-dev \
+    libcairo2-dev libpango1.0-dev libglib2.0-dev \
+    libdisplay-info-dev libliftoff-dev \
+    libdrm-dev libegl1-mesa-dev libgbm-dev libgles2-mesa-dev \
+    libseat-dev libsystemd-dev \
+    libxcb-util0-dev libxcb-composite0-dev libxcb-dri3-dev \
+    libxcb-ewmh-dev libxcb-icccm4-dev libxcb-present-dev \
+    libxcb-render-util0-dev libxcb-res0-dev libxcb-xfixes0-dev \
+    libxcb-xinput-dev libxcb-xkb-dev libxcb-shape0-dev \
+    libxcb-render0-dev libxcb-glx0-dev \
+    xwayland mesa-utils vulkan-tools \
+    xdg-desktop-portal-gtk \
+    qt6-wayland libqt6waylandclient6 \
+    pipewire wireplumber \
+    polkit-kde-agent-1 dunst swaybg swaylock \
+    waybar wofi slurp grim wl-clipboard \
+    glslang-tools \
+    libvulkan-dev libre2-dev \
+    libstdc++-14-dev gcc-14 g++-14 \
+    libzip-dev librsvg2-dev \
+    libjxl-dev libheif-dev libjpeg-dev libwebp-dev
+
+build_dep() {
+    local name="$1"; shift
+    local repo_url="$1"; shift
+    local extra_cmake_args=("$@")
+
+    echo "==> Building $name..."
+    rm -rf "/tmp/$name"
+    git clone --depth 1 "$repo_url" "/tmp/$name"
+    cmake -B "/tmp/$name/build" -S "/tmp/$name" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=gcc-14 \
+        -DCMAKE_CXX_COMPILER=g++-14 \
+        -DCMAKE_CXX_FLAGS="-std=c++26" \
+        -DBUILD_TESTING=OFF \
+        "${extra_cmake_args[@]}"
+    cmake --build "/tmp/$name/build" -j "$(nproc)"
+    run_sudo cmake --install "/tmp/$name/build"
+    rm -rf "/tmp/$name"
+}
+
+echo "==> Building tomlplusplus (header-only)..."
+rm -rf /tmp/tomlplusplus
+git clone --depth 1 https://github.com/marzer/tomlplusplus /tmp/tomlplusplus
+run_sudo mkdir -p /usr/local/include/toml++
+run_sudo cp -r /tmp/tomlplusplus/include/toml++/* /usr/local/include/toml++/
+run_sudo cp /tmp/tomlplusplus/toml.h /usr/local/include/ 2>/dev/null || true
+rm -rf /tmp/tomlplusplus
+
+cat > /tmp/tomlplusplus.pc <<'EOF'
+prefix=/usr/local
+includedir=${prefix}/include
+
+Name: tomlplusplus
+Description: Header-only TOML config file parser and serializer for C++17
+Version: 3.4.0
+Cflags: -I${includedir}
+EOF
+run_sudo cp /tmp/tomlplusplus.pc /usr/local/lib/pkgconfig/tomlplusplus.pc
+rm -f /tmp/tomlplusplus.pc
+
+echo "==> Building pugixml..."
+build_dep pugixml https://github.com/zeux/pugixml \
+    pugixml-shared \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DBUILD_SHARED_LIBS=ON \
+    -DPUGIXML_BUILD_TESTS=OFF
+
+echo "==> Building hyprutils..."
+build_dep hyprutils https://github.com/hyprwm/hyprutils \
+    hyprutils \
+    -DCMAKE_INSTALL_PREFIX=/usr/local
+
+echo "==> Building hyprlang..."
+build_dep hyprlang https://github.com/hyprwm/hyprlang \
+    hyprlang \
+    -DCMAKE_INSTALL_PREFIX=/usr/local
+
+echo "==> Building hyprcursor..."
+build_dep hyprcursor https://github.com/hyprwm/hyprcursor \
+    hyprcursor \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_INSTALL_LIBDIR=lib
+
+echo "==> Building hyprwayland-scanner..."
+build_dep hyprwayland-scanner https://github.com/hyprwm/hyprwayland-scanner \
+    hyprwayland-scanner \
+    -DCMAKE_INSTALL_PREFIX=/usr/local
+
+echo "==> Building hyprgraphics..."
+build_dep hyprgraphics https://github.com/hyprwm/hyprgraphics \
+    hyprgraphics \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DCMAKE_INSTALL_LIBDIR=lib
+
+echo "==> Building aquamarine..."
+build_dep aquamarine https://github.com/hyprwm/aquamarine \
+    aquamarine \
+    -DCMAKE_INSTALL_PREFIX=/usr/local
+
+echo "==> Building Hyprland..."
+rm -rf /tmp/Hyprland
+git clone --depth 1 --recursive https://github.com/hyprwm/Hyprland /tmp/Hyprland
+cmake -B /tmp/Hyprland/build -S /tmp/Hyprland \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER=gcc-14 \
+    -DCMAKE_CXX_COMPILER=g++-14 \
+    -DCMAKE_CXX_FLAGS="-std=c++26" \
+    -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake --build /tmp/Hyprland/build -j "$(nproc)" --target Hyprland
+run_sudo cmake --install /tmp/Hyprland/build
+rm -rf /tmp/Hyprland
+
+echo "==> Writing Hyprland wayland session entry..."
+run_sudo mkdir -p /usr/share/wayland-sessions
+cat > /tmp/hyprland.desktop <<'EOF'
+[Desktop Entry]
+Name=Hyprland
+Comment=An intelligent dynamic tiling Wayland compositor
+Exec=Hyprland
+Type=Application
+EOF
+run_sudo cp /tmp/hyprland.desktop /usr/share/wayland-sessions/hyprland.desktop
+rm -f /tmp/hyprland.desktop
+
+echo "==> Setting up XDG portal..."
+mkdir -p ~/.config/xdg-desktop-portal
+cat > ~/.config/xdg-desktop-portal/hyprland-portals.conf <<'EOF'
+[preferred]
+default=hyprland;gtk
+EOF
+
+if lspci 2>/dev/null | grep -qi nvidia; then
+    echo "==> NVIDIA GPU detected, adding env vars..."
+    mkdir -p ~/.config/hypr
+    grep -q 'LIBVA_DRIVER_NAME,nvidia' ~/.config/hypr/hyprland.conf 2>/dev/null || \
+    cat >> ~/.config/hypr/hyprland.conf <<'NVIDIAEOF'
+
+env = LIBVA_DRIVER_NAME,nvidia
+env = __GLX_VENDOR_LIBRARY_NAME,nvidia
+env = NVD_BACKEND,direct
+env = WLR_NO_HARDWARE_CURSORS,1
+NVIDIAEOF
+fi
+
+echo ""
+echo "==> Done. Hyprland installed."
+echo "    Log out, select 'Hyprland' from your display manager, and log in."
+echo ""
