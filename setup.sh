@@ -49,6 +49,10 @@ ansible-playbook ~/.os/ansible/${TARGET_OS}.yaml --ask-become-pass
 echo "==> Applying chezmoi dotfiles..."
 "$CHEZMOI_BIN" init --source ~/.os/chezmoi --apply
 
+echo "==> Configuring docker..."
+sudo systemctl enable --now docker 2>/dev/null || true
+sudo usermod -aG docker "$USER" 2>/dev/null || true
+
 if command -v omarchy &> /dev/null; then
     echo "==> Setting wallpaper..."
     omarchy theme bg set ~/.os/assets/wallpaper.png || true

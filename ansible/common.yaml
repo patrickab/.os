@@ -22,6 +22,7 @@
       - wget
       - kitty
       - xclip
+      - "{{ 'docker.io' if ansible_facts['os_family'] == 'Debian' else 'docker' }}"
     state: present
   become: yes
 
@@ -86,6 +87,8 @@
       - bat
       - eza
       - zoxide
+      - docker
+      - docker-compose
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
