@@ -93,7 +93,7 @@
 - name: Install fonts via Homebrew
   community.general.homebrew_cask:
     name:
-      - font-fira-code-nerd-font
+      - font-jetbrains-mono-nerd-font
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
