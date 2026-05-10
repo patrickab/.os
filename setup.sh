@@ -53,6 +53,9 @@ echo "==> Configuring docker..."
 sudo systemctl enable --now docker 2>/dev/null || true
 sudo usermod -aG docker "$USER" 2>/dev/null || true
 
+echo "==> Starting OpenWebUI..."
+docker compose -f "$HOME/.config/openwebui/docker-compose.yml" up -d 2>/dev/null || echo "  (docker group not active yet – run 'newgrp docker' then 'openwebui')"
+
 if command -v omarchy &> /dev/null; then
     echo "==> Setting wallpaper..."
     omarchy theme bg set ~/.os/assets/wallpaper.png || true
