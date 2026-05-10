@@ -11,8 +11,20 @@ if [ -f /etc/debian_version ]; then
     TARGET_OS="debian"
     echo "==> Detected Debian — installing prerequisites..."
     sudo apt update
-    sudo apt install -y curl git python3-pip build-essential procps file
-    pip3 install --user ansible
+    sudo apt install -y curl git build-essential procps file
+
+    if ! command -v uv &> /dev/null; then
+        echo "==> Bootstrapping uv..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+    fi
+
+    if ! command -v ansible-playbook &> /dev/null; then
+        echo "==> Installing ansible via uv..."
+        uv tool install ansible
+        for bin in "$HOME/.local/share/uv/tools/ansible/bin/ansible"*; do
+            ln -sf "$bin" "$HOME/.local/bin/"
+        done
+    fi
 elif [ -f /etc/arch-release ]; then
     TARGET_OS="omarchy"
     echo "==> Detected Arch/Omarchy — installing prerequisites..."
@@ -35,7 +47,7 @@ echo "==> Running Ansible playbook: ${TARGET_OS}.yaml"
 ansible-playbook ~/.os/ansible/${TARGET_OS}.yaml --ask-become-pass
 
 echo "==> Applying chezmoi dotfiles..."
-"$CHEZMOI_BIN" init --source ~/.os/chezmoi --working-tree ~/.os --apply
+"$CHEZMOI_BIN" init --source ~/.os/chezmoi --apply
 
 if command -v omarchy &> /dev/null; then
     echo "==> Setting wallpaper..."

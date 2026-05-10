@@ -38,6 +38,7 @@
   loop:
     - /home/linuxbrew
     - /home/linuxbrew/.linuxbrew
+    - /home/linuxbrew/.linuxbrew/bin
   become: yes
 
 - name: Check if Homebrew is installed
@@ -101,6 +102,19 @@
 
 # Flatpak Packages
 # Provide sandboxed, dependency-free GUI installations across distros.
+
+- name: Install flatpak
+  package:
+    name: flatpak
+    state: present
+  become: yes
+
+- name: Add Flathub remote
+  flatpak_remote:
+    name: flathub
+    flatpakrepo_url: https://dl.flathub.org/repo/flathub.flatpakrepo
+    state: present
+  become: no
 
 - name: Install flatpak packages
   flatpak:
