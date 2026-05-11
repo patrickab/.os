@@ -1,5 +1,4 @@
-# API-keys
-[ -f ~/.secrets ] && source ~/.secrets
+
 
 alias ls='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto'
 alias tree='ls --tree -I "__pycache__"'
@@ -36,7 +35,8 @@ function yy() {
         fi
         rm -f -- "$tmp"
 }
-export OLLAMA_API_BASE=http://127.0.0.1:11434
+export OLLAMA_HOST=0.0.0.0
+export OLLAMA_API_BASE=http://host.docker.internal:11434
 export SECURE_LOOPBACK_IP="10.200.200.1"
 # User Settings
 export TERMINAL="kitty"
@@ -59,3 +59,5 @@ if ! ss -a 2>/dev/null | grep -q "$SSH_AUTH_SOCK"; then
 fi
 
 [[ -f ~/.bashrc_appendix_omarchy ]] && source ~/.bashrc_appendix_omarchy
+[[ -f ~/.bashrc_appendix_gpt ]] && source ~/.bashrc_appendix_gpt
+[[ -f ~/.bashrc_appendix_openwebui ]] && source ~/.bashrc_appendix_openwebui

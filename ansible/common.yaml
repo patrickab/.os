@@ -78,7 +78,6 @@
       - bash-preexec
       - atuin
       - opencode
-      - ollama
       - yazi
       - neovim
       - ripgrep
