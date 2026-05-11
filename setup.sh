@@ -53,6 +53,11 @@ echo "==> Configuring docker..."
 sudo systemctl enable --now docker 2>/dev/null || true
 sudo usermod -aG docker "$USER" 2>/dev/null || true
 
+if ! command -v ollama &>/dev/null || ! systemctl is-active --quiet ollama 2>/dev/null; then
+    echo "==> Installing Ollama (native, GPU-aware)..."
+    curl -fsSL https://ollama.com/install.sh | sudo sh
+fi
+
 echo "==> Starting OpenWebUI..."
 docker compose -f "$HOME/.config/openwebui/docker-compose.yml" up -d 2>/dev/null || echo "  (docker group not active yet – run 'newgrp docker' then 'openwebui')"
 
