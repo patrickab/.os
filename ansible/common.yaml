@@ -21,8 +21,8 @@
       - curl
       - wget
       - kitty
-      - xclip
-      - "{{ 'docker.io' if ansible_facts['os_family'] == 'Debian' else 'docker' }}"
+      - "{{ 'xclip' if ansible_facts['os_family'] != 'RedHat' else 'xsel' }}"
+      - "{{ 'docker' if ansible_facts['os_family'] not in ['Debian', 'RedHat'] else omit }}"
     state: present
   become: yes
 
@@ -86,17 +86,26 @@
       - bat
       - eza
       - zoxide
+    state: latest
+    path: /home/linuxbrew/.linuxbrew/bin
+  become: no
+
+- name: Install Docker via Homebrew (non-Debian/RedHat; Debian/Fedora use geerlingguy.docker role)
+  community.general.homebrew:
+    name:
       - docker
       - docker-compose
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
+  when: ansible_facts['os_family'] not in ['Debian', 'RedHat']
 
 - name: Install fonts via Homebrew
   community.general.homebrew_cask:
     name:
       - font-jetbrains-mono-nerd-font
     state: latest
+    install_options: force
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
 

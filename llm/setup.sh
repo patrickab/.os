@@ -57,6 +57,8 @@ if ! docker compose version &>/dev/null && ! command -v docker-compose &>/dev/nu
     red "ERROR: docker compose not available."; exit 1
 fi
 
+mkdir -p ~/.docker
+
 if ! command -v ollama &>/dev/null; then
     yellow "WARNING: ollama not found. Run ./setup.sh to install it."
 fi
@@ -97,8 +99,12 @@ echo ""
 echo "==> Building GPT Researcher image..."
 $COMPOSE_CMD -f "$LLM_DIR/gpt-researcher/docker-compose.yml" build
 
+sudo chown -R "$(id -u):$(id -g)" ~/.docker
+
 echo "==> Starting GPT Researcher..."
 $COMPOSE_CMD -f "$LLM_DIR/gpt-researcher/docker-compose.yml" up -d
+
+sudo chown -R "$(id -u):$(id -g)" ~/.docker
 
 # ── Step 6 – verify MCP endpoint ─────────────────────────────────────────
 echo ""
@@ -128,15 +134,14 @@ if docker ps --format '{{.Names}}' | grep -q '^openwebui$'; then
     if echo "$MCP_STATUS" | grep -qE '200|400|406'; then
         green "    MCP reachable from OpenWebUI container"
         echo ""
-        echo "    Run the registration script to enable it in OpenWebUI:"
-        echo "      $LLM_DIR/scripts/register-mcp-openwebui.sh"
+        "$LLM_DIR/scripts/register-mcp-openwebui.sh"
     else
         yellow "    MCP endpoint not yet reachable from OpenWebUI container."
-        echo "    Register later with: $LLM_DIR/scripts/register-mcp-server.sh"
+        echo "    Register later with: $LLM_DIR/scripts/register-mcp-openwebui.sh"
     fi
 else
     yellow "    OpenWebUI not running. Start it with: openwebui"
-    echo "    Then register with: $LLM_DIR/scripts/register-mcp-server.sh"
+    echo "    Then register with: $LLM_DIR/scripts/register-mcp-openwebui.sh"
 fi
 
 # ── Done ───────────────────────────────────────────────────────────────────
@@ -153,7 +158,4 @@ echo "    stop-gpt-research                 Stop the stack"
 echo "    logs-gpt-research                 Follow service logs"
 echo "    openwebui                         Start OpenWebUI"
 echo "    openwebui-down                     Stop OpenWebUI"
-echo ""
-echo "  Register MCP in OpenWebUI:"
-echo "    $LLM_DIR/scripts/register-mcp-openwebui.sh"
 echo ""

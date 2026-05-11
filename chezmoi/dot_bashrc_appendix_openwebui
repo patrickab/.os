@@ -1,15 +1,16 @@
 # --- OpenWebUI (docker compose) ---
 OPENWEBUI_DIR="$HOME/.os/llm/openwebui"
+export DOCKER_HOST=unix:///var/run/docker.sock
 
 openwebui() {
-    docker-compose -f "$OPENWEBUI_DIR/docker-compose.yml" up -d
+    docker compose -f "$OPENWEBUI_DIR/docker-compose.yml" up -d
     echo "OpenWebUI: http://localhost:3000"
 }
 
 openwebui-down() {
-    docker-compose -f "$OPENWEBUI_DIR/docker-compose.yml" down
+    docker compose -f "$OPENWEBUI_DIR/docker-compose.yml" down
 }
 
 openwebui-logs() {
-    docker-compose -f "$OPENWEBUI_DIR/docker-compose.yml" logs --tail=100 -f
+    docker compose -f "$OPENWEBUI_DIR/docker-compose.yml" logs --tail=100 -f
 }

@@ -1,0 +1,44 @@
+---
+- hosts: localhost
+  connection: local
+  vars:
+    docker_obsolete_packages:
+      - docker
+      - docker-common
+      - docker-engine
+      - podman-docker
+      - containerd
+      - runc
+
+  pre_tasks:
+    - block:
+        - name: Install Docker from official repo via geerlingguy.docker role
+          include_role:
+            name: geerlingguy.docker
+
+        - name: Fix ~/.docker directory ownership (root created it before user was in docker group)
+          file:
+            path: "/home/{{ ansible_facts['user_id'] }}/.docker"
+            owner: "{{ ansible_facts['user_id'] }}"
+            group: "{{ ansible_facts['user_id'] }}"
+            recurse: yes
+      become: yes
+
+  tasks:
+    - name: Import universal tasks
+      import_tasks: common.yaml
+
+    ### DOCKER (via geerlingguy.docker role) ###
+    # Fedora ships podman-docker which shadows the docker CLI.
+    # The geerlingguy.docker role installs from Docker's official yum repo
+    # and removes obsolete packages; podman-docker is appended to the default
+    # list so it gets cleaned up before the real docker-ce is installed.
+
+    ### FEDORA-SPECIFIC PACKAGES ###
+
+    - name: Install Fedora-specific packages
+      dnf:
+        name:
+          # fedora utilities go here
+        state: present
+      become: yes
