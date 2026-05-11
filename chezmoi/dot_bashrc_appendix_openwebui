@@ -1,5 +1,5 @@
 # --- OpenWebUI (docker compose) ---
-OPENWEBUI_DIR="$HOME/.config/openwebui"
+OPENWEBUI_DIR="$HOME/.os/llm/openwebui"
 
 openwebui() {
     docker-compose -f "$OPENWEBUI_DIR/docker-compose.yml" up -d

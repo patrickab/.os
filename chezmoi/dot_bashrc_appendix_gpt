@@ -1,5 +1,5 @@
 # --- GPT Research (docker compose stack) ---
-GPT_RESEARCH_DIR="$HOME/.config/gpt-research"
+GPT_RESEARCH_DIR="$HOME/.os/llm/gpt-researcher"
 
 launch-gpt-research() {
     local fast="" smart="" show_help=0 ollama=""
@@ -46,7 +46,7 @@ HELP
         return 0
     fi
 
-    [ ! -f "$GPT_RESEARCH_DIR/docker-compose.yml" ] && { echo "ERROR: gpt-research not configured. Run: setup-gpt-researcher"; return 1; }
+    [ ! -f "$GPT_RESEARCH_DIR/docker-compose.yml" ] && { echo "ERROR: gpt-research not configured. Run: llm/setup.sh"; return 1; }
 
     [ -n "$fast" ]  && export FAST_LLM="$fast"
     [ -n "$smart" ] && export SMART_LLM="$smart"
@@ -71,7 +71,7 @@ HELP
     echo ""
     echo "OpenWebUI:          http://localhost:3000"
     echo "GPT Researcher MCP: http://localhost:8000/mcp"
-    echo "Register in OpenWebUI: ~/.os/scripts/register-mcp-openwebui.sh"
+    echo "Register in OpenWebUI: ~/.os/llm/scripts/register-mcp-openwebui.sh"
     echo ""
 }
 
