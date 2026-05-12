@@ -11,8 +11,10 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
-      - FAST_LLM=${FAST_LLM:-deepseek-v4-pro:cloud}
-      - SMART_LLM=${SMART_LLM:-deepseek-v4-pro:cloud}
+      - FAST_LLM=${FAST_LLM:-ollama:deepseek-v4-pro:cloud}
+      - SMART_LLM=${SMART_LLM:-ollama:deepseek-v4-pro:cloud}
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - EMBEDDING=${EMBEDDING:-ollama:nomic-embed-text}
       - RETRIEVER=tavily,mcp
       - MCP_PORT=8000
     extra_hosts:
