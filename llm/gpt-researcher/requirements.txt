@@ -1,2 +1,0 @@
-gpt-researcher>=0.9.0
-mcp[cli]>=1.0.0

@@ -1,5 +1,0 @@
-{
-  "name": "gpt-researcher",
-  "type": "mcp",
-  "url": "http://host.docker.internal:8000/mcp"
-}

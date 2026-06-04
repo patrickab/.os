@@ -63,18 +63,28 @@
   when: not brew_check.stat.exists
   become: no
 
-- name: Tap oh-my-posh repository
-  community.general.homebrew_tap:
-    name: jandedobbeleer/oh-my-posh
-    state: present
-    path: /home/linuxbrew/.linuxbrew/bin
+# Uninstall the upstream jandedobbeleer/oh-my-posh tap (its cask has a nil sha256
+# and shadows the working homebrew-core formula). Idempotent: ignore failures so
+# a fresh box without the tap doesn't break.
+- name: Remove broken jandedobbeleer/oh-my-posh tap
+  command: /home/linuxbrew/.linuxbrew/bin/brew untap jandedobbeleer/oh-my-posh
+  register: untap_omp
+  failed_when: false
+  changed_when: untap_omp.rc == 0
+  become: no
+
+- name: Remove stale oh-my-posh install from prior runs
+  command: /home/linuxbrew/.linuxbrew/bin/brew uninstall --force oh-my-posh
+  register: uninstall_omp
+  failed_when: false
+  changed_when: uninstall_omp.rc == 0
   become: no
 
 - name: Install CLI tools via Homebrew
   community.general.homebrew:
     name:
       - uv
-      - jandedobbeleer/oh-my-posh/oh-my-posh
+      - oh-my-posh
       - bash-preexec
       - atuin
       - opencode
@@ -88,6 +98,22 @@
       - zoxide
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
+  become: no
+
+# Belt-and-braces: if `brew link` ever drifts again (e.g. upgrade leaves a stale
+# opt/ symlink at an old version), force re-link so PATH resolves correctly.
+- name: Force-link oh-my-posh so its binary is on PATH
+  command: /home/linuxbrew/.linuxbrew/bin/brew link --force oh-my-posh
+  register: link_omp
+  failed_when: false
+  changed_when: "'Linking' in link_omp.stdout or 'Relinking' in link_omp.stdout"
+  become: no
+
+- name: Verify oh-my-posh binary is reachable
+  command: /home/linuxbrew/.linuxbrew/bin/brew --prefix oh-my-posh
+  register: omp_prefix
+  changed_when: false
+  failed_when: omp_prefix.rc != 0
   become: no
 
 - name: Install Docker via Homebrew (non-Debian/RedHat; Debian/Fedora use geerlingguy.docker role)
