@@ -59,5 +59,3 @@ if ! ss -a 2>/dev/null | grep -q "$SSH_AUTH_SOCK"; then
 fi
 
 [[ -f ~/.bashrc_appendix_omarchy ]] && source ~/.bashrc_appendix_omarchy
-[[ -f ~/.bashrc_appendix_gpt ]] && source ~/.bashrc_appendix_gpt
-[[ -f ~/.bashrc_appendix_openwebui ]] && source ~/.bashrc_appendix_openwebui

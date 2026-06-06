@@ -75,9 +75,6 @@ if ! command -v ollama &>/dev/null || ! systemctl is-active --quiet ollama 2>/de
     curl -fsSL https://ollama.com/install.sh | sudo sh
 fi
 
-echo "==> Starting OpenWebUI..."
-docker-compose -f "$HOME/.os/llm/openwebui/docker-compose.yml" up -d 2>/dev/null || echo "  (docker group not active yet – run 'newgrp docker' then 'openwebui')"
-
 if command -v omarchy &> /dev/null; then
     echo "==> Setting wallpaper..."
     omarchy theme bg set ~/.os/assets/wallpaper.png || true
