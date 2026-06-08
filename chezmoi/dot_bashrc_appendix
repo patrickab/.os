@@ -58,4 +58,15 @@ if ! ss -a 2>/dev/null | grep -q "$SSH_AUTH_SOCK"; then
   ssh-agent -a "$SSH_AUTH_SOCK" >/dev/null 2>&1
 fi
 
+# --- GitHub CLI (gh) ---
+eval "$(gh completion -s bash 2>/dev/null)"
+alias gpr='gh pr create'
+alias gprm='gh pr merge'
+alias gprv='gh pr view'
+alias gck='gh pr checkout'
+alias giss='gh issue create'
+alias giro='gh repo view --web'
+alias gcl='gh repo clone'
+alias gact='gh run watch'
+
 [[ -f ~/.bashrc_appendix_omarchy ]] && source ~/.bashrc_appendix_omarchy
