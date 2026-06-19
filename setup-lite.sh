@@ -19,4 +19,7 @@ fi
 echo "==> Applying chezmoi dotfiles only (Lite Mode)..."
 "$CHEZMOI_BIN" init --source ~/.os/chezmoi --working-tree ~/.os --apply
 
+echo "==> Syncing agent configs (cursor|codex|opencode|claude)..."
+~/.os/scripts/sync-agent-configs.sh
+
 echo "==> Done."

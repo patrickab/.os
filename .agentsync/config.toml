@@ -1,0 +1,18 @@
+# agentsync configuration for ~/.os dotfiles
+# Canonical source: chezmoi/dot_agents/ (AGENTS.md, skills/, commands/)
+# Run: scripts/sync-agent-configs.sh
+
+[agentsync]
+version = "1.0.0"
+canonical = ".agentsync/rules.md"
+
+# Rule file generators used by sync-agent-configs.sh (global targets, not repo root).
+tools = [
+  "agents_md",
+  "claude_md",
+  "cursor_mdc",
+  "opencode",
+]
+
+auto_gitignore = false
+warn_unmanaged = false

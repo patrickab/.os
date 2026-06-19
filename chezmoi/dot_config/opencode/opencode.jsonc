@@ -4,19 +4,5 @@
     "ignore": [
       "uv.lock"
     ]
-  },
-  "command": {
-    "diff-commit": {
-      "description": "Show unstaged git diff and propose a commit message",
-      "template": "Run `git diff -- . ':(exclude)uv.lock'` to see the unstaged changes (uv.lock is excluded). Propose a Conventional Commits message (type(scope): subject) with a short body explaining the why. Use concise imperative language. Present the message in a fenced code block. Do NOT run `git commit`. If there are no unstaged changes, say so.",
-    },
-    "diff-staged": {
-      "description": "Show staged git diff and propose a commit message",
-      "template": "Run `git diff --staged -- . ':(exclude)uv.lock'` to see the staged changes (uv.lock is excluded). Propose a Conventional Commits message (type(scope): subject) with a short body explaining the why. Use concise imperative language. Present the message in a fenced code block. Do NOT run `git commit`. If nothing is staged, say so.",
-    },
-    "diff-review": {
-      "description": "Review unstaged changes for size and runtime performance risks",
-      "template": "Run `git diff -- . ':(exclude)uv.lock'` to see unstaged changes (uv.lock is excluded). Review the diff for two risks: (1) excessive LOC or complexity in any single function/block, and (2) runtime performance regressions in hot paths. For each finding, cite file:line and propose a concrete fix. Use concise imperative language. Do NOT modify any files."
-    }
   }
 }

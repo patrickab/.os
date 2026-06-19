@@ -104,6 +104,14 @@
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
 
+- name: Install rulesync (agentsync) via uv for cross-agent config sync
+  ansible.builtin.command:
+    cmd: uv tool install rulesync
+    creates: "{{ ansible_env.HOME }}/.local/bin/rulesync"
+  environment:
+    PATH: "{{ ansible_env.HOME }}/.local/bin:{{ ansible_env.HOME }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_env.PATH }}"
+  become: no
+
 - name: Install Docker via Homebrew (non-Debian/RedHat; Debian/Fedora use geerlingguy.docker role)
   community.general.homebrew:
     name:

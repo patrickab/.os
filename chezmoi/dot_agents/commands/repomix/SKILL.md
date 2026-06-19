@@ -1,4 +1,5 @@
 ---
+name: repomix
 description: Run repomix and generate/update the four summary context docs
 ---
 
