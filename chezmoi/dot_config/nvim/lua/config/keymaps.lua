@@ -3,3 +3,7 @@
 -- Add any additional keymaps here
 
 vim.keymap.set({ "n", "v", "i" }, "<C-a>", "<Esc>ggVG", { desc = "Select All" })
+
+vim.keymap.set("n", "yf", function()
+  vim.fn.setreg("+", vim.fn.expand("%:p"))
+end, { desc = "Yank file path" })
