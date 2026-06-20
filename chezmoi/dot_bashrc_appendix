@@ -1,7 +1,9 @@
 
 
 alias ls='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto'
-alias tree='ls --tree -I "__pycache__"'
+alias tree='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto --tree'
+alias treei='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto --tree --git-ignore -I "__pycache__"'
+
 alias python='python3'
 
 # Restrict GPU access
