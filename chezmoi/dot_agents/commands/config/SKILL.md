@@ -52,7 +52,7 @@ The repo root is `~/.os`. Configurations are **not** edited in `$HOME` directly 
    ~/.os/setup-lite.sh
    ```
 
-   `setup-lite.sh` runs `chezmoi init --source ~/.os/chezmoi --working-tree ~/.os --apply`, then `scripts/sync-agent-configs.sh`. It does **not** run the full Ansible playbook.
+   `setup-lite.sh` runs `chezmoi init --source ~/.os/chezmoi --apply`. Chezmoi's `run_onchange_after_sync-agent-configs.sh` hook automatically calls `scripts/sync-agent-configs.sh` whenever `dot_agents/` content has changed. It does **not** run the full Ansible playbook.
 
 3. **Report**
 

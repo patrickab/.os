@@ -1,0 +1,6 @@
+[Unit]
+Description=Apply chezmoi dotfiles on source change
+
+[Service]
+Type=oneshot
+ExecStart=chezmoi apply --source %h/.os/chezmoi

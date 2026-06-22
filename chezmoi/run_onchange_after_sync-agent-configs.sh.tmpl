@@ -1,0 +1,13 @@
+#!/bin/bash
+# Triggered by chezmoi whenever dot_agents/ content changes.
+# {{ output "sh" "-c" (printf "find %q -type f | sort | xargs sha256sum | sha256sum" (joinPath .chezmoi.sourceDir "dot_agents")) | trim }}
+set -euo pipefail
+
+SYNC_SCRIPT="$HOME/.os/scripts/sync-agent-configs.sh"
+
+if [[ -x "$SYNC_SCRIPT" ]]; then
+    echo "==> Syncing agent configs (cursor|codex|opencode|claude)..."
+    "$SYNC_SCRIPT"
+else
+    echo "[WARN] sync-agent-configs.sh not found at $SYNC_SCRIPT, skipping"
+fi

@@ -100,6 +100,7 @@
       - eza
       - zoxide
       - gh
+      - repomix
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no

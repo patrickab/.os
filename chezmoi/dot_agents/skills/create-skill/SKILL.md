@@ -77,11 +77,10 @@ Reference extra files from `SKILL.md`; do not duplicate long content inline.
    - Skill: `~/.os/chezmoi/dot_agents/skills/<name>/SKILL.md`
    - Command: `~/.os/chezmoi/dot_agents/commands/<name>/SKILL.md`
 
-4. **Sync** so all tools receive the change:
+4. **Sync** so all tools receive the change. Either:
 
-   ```bash
-   ~/.os/scripts/sync-agent-configs.sh
-   ```
+   - Run `~/.os/setup-lite.sh` (chezmoi apply — triggers sync automatically via `run_onchange` hook)
+   - Or run `~/.os/scripts/sync-agent-configs.sh` directly for immediate sync without full chezmoi apply
 
 5. **Report** what was created, the path, skill vs command, and remind the user to restart agent sessions if needed.
 
