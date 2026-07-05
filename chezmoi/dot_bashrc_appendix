@@ -71,4 +71,7 @@ alias giro='gh repo view --web'
 alias gcl='gh repo clone'
 alias gact='gh run watch'
 
+# --- Bitwarden Secrets Manager ---
+alias secrets-sync='~/.os/scripts/sync-bitwarden-secrets.sh && source ~/.secrets && echo "secrets refreshed"'
+
 [[ -f ~/.bashrc_appendix_omarchy ]] && source ~/.bashrc_appendix_omarchy
