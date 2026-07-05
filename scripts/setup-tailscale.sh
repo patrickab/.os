@@ -153,6 +153,19 @@ ensure_system_sshd() {
     fi
   fi
 
+  # sshd refuses to start without host keys. Generate them if missing
+  # (covers cases where the binary exists but keys were never created,
+  # e.g. a manual install that skipped the postinst keygen step).
+  if ! ls /etc/ssh/ssh_host_*key &>/dev/null; then
+    echo "  No SSH host keys found; generating via 'ssh-keygen -A'..."
+    sudo ssh-keygen -A
+  fi
+  if ! sudo /usr/sbin/sshd -t &>/dev/null; then
+    red "Error: sshd config test failed. Run 'sudo /usr/sbin/sshd -t' to debug."
+    sudo /usr/sbin/sshd -t || true
+    exit 1
+  fi
+
   SSHD_SERVICE=""
   for svc in ssh sshd; do
     if command -v systemctl &>/dev/null && systemctl list-unit-files 2>/dev/null | grep -q "^${svc}\.service"; then
@@ -174,7 +187,7 @@ ensure_system_sshd() {
     if pgrep -x sshd &>/dev/null; then
       green "sshd started (pid: $(pgrep -x sshd | head -n1))."
     else
-      red "Error: sshd failed to start."
+      red "Error: sshd failed to start. Check 'sudo /usr/sbin/sshd -t' and /var/log/auth.log."
       exit 1
     fi
   fi
