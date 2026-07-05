@@ -1,0 +1,72 @@
+---
+- hosts: localhost
+  connection: local
+  pre_tasks:
+    - name: Remove podman-docker (shadows docker CLI)
+      dnf:
+        name: podman-docker
+        state: absent
+      become: yes
+
+    - name: Install Docker
+      dnf:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+      become: yes
+
+    - name: Start and enable Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_facts['user_id'] }}"
+        groups: docker
+        append: yes
+      become: yes
+
+    - name: Fix ~/.docker directory ownership (root created it before user was in docker group)
+      file:
+        path: "/home/{{ ansible_facts['user_id'] }}/.docker"
+        owner: "{{ ansible_facts['user_id'] }}"
+        group: "{{ ansible_facts['user_id'] }}"
+        recurse: yes
+      become: yes
+
+    - name: Configure Ollama to listen on all interfaces (Docker bridge needs access)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ollama.service.d/override.conf
+        content: |
+          [Service]
+          Environment="OLLAMA_HOST=0.0.0.0"
+        mode: '0644'
+      become: yes
+      notify: Reload Ollama
+
+  tasks:
+    - name: Import universal tasks
+      import_tasks: common.yaml
+
+    ### FEDORA-SPECIFIC PACKAGES ###
+
+    - name: Install Fedora-specific packages
+      dnf:
+        name:
+          # fedora utilities go here
+        state: present
+      become: yes
+
+  handlers:
+    - name: Reload Ollama
+      ansible.builtin.systemd:
+        name: ollama
+        daemon_reload: yes
+        state: restarted
+      become: yes

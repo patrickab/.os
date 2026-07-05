@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch chezmoi source for changes
+
+[Path]
+PathChanged=%h/.os/chezmoi
+Unit=chezmoi-watch.service
+
+[Install]
+WantedBy=default.target

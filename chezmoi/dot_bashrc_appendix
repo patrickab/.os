@@ -1,8 +1,9 @@
-# API-keys
-[ -f ~/.secrets ] && source ~/.secrets
+
 
 alias ls='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto'
-alias tree='ls --tree -I "__pycache__"'
+alias tree='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto --tree'
+alias treei='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto --tree --git-ignore -I "__pycache__"'
+
 alias python='python3'
 
 # Restrict GPU access
@@ -36,7 +37,8 @@ function yy() {
         fi
         rm -f -- "$tmp"
 }
-export OLLAMA_API_BASE=http://127.0.0.1:11434
+export OLLAMA_HOST=0.0.0.0
+export OLLAMA_API_BASE=http://host.docker.internal:11434
 export SECURE_LOOPBACK_IP="10.200.200.1"
 # User Settings
 export TERMINAL="kitty"
@@ -57,5 +59,19 @@ export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
 if ! ss -a 2>/dev/null | grep -q "$SSH_AUTH_SOCK"; then
   ssh-agent -a "$SSH_AUTH_SOCK" >/dev/null 2>&1
 fi
+
+# --- GitHub CLI (gh) ---
+eval "$(gh completion -s bash 2>/dev/null)"
+alias gpr='gh pr create'
+alias gprm='gh pr merge'
+alias gprv='gh pr view'
+alias gck='gh pr checkout'
+alias giss='gh issue create'
+alias giro='gh repo view --web'
+alias gcl='gh repo clone'
+alias gact='gh run watch'
+
+# --- Bitwarden Secrets Manager ---
+alias secrets-sync='~/.os/scripts/sync-bitwarden-secrets.sh && source ~/.secrets && echo "secrets refreshed"'
 
 [[ -f ~/.bashrc_appendix_omarchy ]] && source ~/.bashrc_appendix_omarchy

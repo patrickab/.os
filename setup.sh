@@ -25,6 +25,23 @@ if [ -f /etc/debian_version ]; then
             ln -sf "$bin" "$HOME/.local/bin/"
         done
     fi
+elif [ -f /etc/fedora-release ]; then
+    TARGET_OS="fedora"
+    echo "==> Detected Fedora — installing prerequisites..."
+    sudo dnf install -y curl git gcc make procps-ng file
+
+    if ! command -v uv &> /dev/null; then
+        echo "==> Bootstrapping uv..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+    fi
+
+    if ! command -v ansible-playbook &> /dev/null; then
+        echo "==> Installing ansible via uv..."
+        uv tool install ansible
+        for bin in "$HOME/.local/share/uv/tools/ansible/bin/ansible"*; do
+            ln -sf "$bin" "$HOME/.local/bin/"
+        done
+    fi
 elif [ -f /etc/arch-release ]; then
     TARGET_OS="omarchy"
     echo "==> Detected Arch/Omarchy — installing prerequisites..."
@@ -53,8 +70,10 @@ echo "==> Configuring docker..."
 sudo systemctl enable --now docker 2>/dev/null || true
 sudo usermod -aG docker "$USER" 2>/dev/null || true
 
-echo "==> Starting OpenWebUI..."
-docker compose -f "$HOME/.config/openwebui/docker-compose.yml" up -d 2>/dev/null || echo "  (docker group not active yet – run 'newgrp docker' then 'openwebui')"
+if ! command -v ollama &>/dev/null || ! systemctl is-active --quiet ollama 2>/dev/null; then
+    echo "==> Installing Ollama (native, GPU-aware)..."
+    curl -fsSL https://ollama.com/install.sh | sudo sh
+fi
 
 if command -v omarchy &> /dev/null; then
     echo "==> Setting wallpaper..."

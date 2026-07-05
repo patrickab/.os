@@ -21,8 +21,8 @@
       - curl
       - wget
       - kitty
-      - xclip
-      - "{{ 'docker.io' if ansible_facts['os_family'] == 'Debian' else 'docker' }}"
+      - "{{ 'xclip' if ansible_facts['os_family'] != 'RedHat' else 'xsel' }}"
+      - "{{ 'docker' if ansible_facts['os_family'] not in ['Debian', 'RedHat'] else omit }}"
     state: present
   become: yes
 
@@ -63,22 +63,34 @@
   when: not brew_check.stat.exists
   become: no
 
-- name: Tap oh-my-posh repository
-  community.general.homebrew_tap:
-    name: jandedobbeleer/oh-my-posh
-    state: present
+- name: Check if oh-my-posh is installed
+  stat:
+    path: /home/linuxbrew/.linuxbrew/bin/oh-my-posh
+  register: omp_binary
+
+- name: Remove broken jandedobbeleer/oh-my-posh tap
+  command: /home/linuxbrew/.linuxbrew/bin/brew untap jandedobbeleer/oh-my-posh
+  register: untap_omp
+  failed_when: false
+  changed_when: untap_omp.rc == 0
+  become: no
+  when: not omp_binary.stat.exists
+
+- name: Install oh-my-posh via Homebrew
+  community.general.homebrew:
+    name: oh-my-posh
+    state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
+  when: not omp_binary.stat.exists
 
 - name: Install CLI tools via Homebrew
   community.general.homebrew:
     name:
       - uv
-      - jandedobbeleer/oh-my-posh/oh-my-posh
       - bash-preexec
       - atuin
       - opencode
-      - ollama
       - yazi
       - neovim
       - ripgrep
@@ -87,17 +99,36 @@
       - bat
       - eza
       - zoxide
+      - gh
+      - repomix
+    state: latest
+    path: /home/linuxbrew/.linuxbrew/bin
+  become: no
+
+- name: Install rulesync (agentsync) via uv for cross-agent config sync
+  ansible.builtin.command:
+    cmd: uv tool install rulesync
+    creates: "{{ ansible_env.HOME }}/.local/bin/rulesync"
+  environment:
+    PATH: "{{ ansible_env.HOME }}/.local/bin:{{ ansible_env.HOME }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_env.PATH }}"
+  become: no
+
+- name: Install Docker via Homebrew (non-Debian/RedHat; Debian/Fedora use geerlingguy.docker role)
+  community.general.homebrew:
+    name:
       - docker
       - docker-compose
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
+  when: ansible_facts['os_family'] not in ['Debian', 'RedHat']
 
 - name: Install fonts via Homebrew
   community.general.homebrew_cask:
     name:
       - font-jetbrains-mono-nerd-font
     state: latest
+    install_options: force
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
 
@@ -124,5 +155,6 @@
     name:
       - com.google.Chrome
       - md.obsidian.Obsidian
+      - com.vivaldi.Vivaldi
     state: present
   become: no

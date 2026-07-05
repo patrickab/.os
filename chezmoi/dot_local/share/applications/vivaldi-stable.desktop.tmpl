@@ -1,0 +1,25 @@
+{{- $bin := "vivaldi-stable" -}}
+{{- if and (not (lookPath "vivaldi-stable")) (lookPath "vivaldi") -}}
+{{- $bin = "vivaldi" -}}
+{{- end -}}
+[Desktop Entry]
+Version=1.0
+Name=Vivaldi
+GenericName=Web Browser
+Comment=Access the Internet
+Exec={{ $bin }} --touch-events=enabled %U
+StartupNotify=true
+Terminal=false
+Icon=vivaldi
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xhtml+xml;application/xhtml_xml;application/xml;image/gif;image/jpeg;image/png;image/webp;text/html;text/xml;x-scheme-handler/http;x-scheme-handler/https;
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec={{ $bin }} --touch-events=enabled --new-window
+
+[Desktop Action new-private-window]
+Name=New Private Window
+Exec={{ $bin }} --touch-events=enabled --incognito
