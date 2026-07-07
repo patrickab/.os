@@ -34,4 +34,5 @@ missing from these files.**
   this repo look like right now". Keep them small and current.
 - Do not edit `.docs/repo-context.md` by hand. It is regenerated.
 - Do not duplicate information across the four summary docs.
+- If a change made during the session makes one of the four summary docs materially wrong or stale (new module, changed architecture, shifted focus), edit that doc directly with a small targeted diff. This is not `/repomix` — never touch `.docs/repo-context.md` this way. Skip the update if nothing material changed; don't rewrite a doc for a one-line change.
 - **The agent shall NEVER commit, push, or amend unless explicitly requested and instructed by the user.**

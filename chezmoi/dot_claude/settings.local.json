@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl http://127.0.0.1:*)",
+      "Bash(curl https://127.0.0.1:*)",
+      "Bash(curl http://localhost:*)",
+      "Bash(curl https://localhost:*)",
+      "Bash(curl -s http://127.0.0.1:*)",
+      "Bash(curl -s https://127.0.0.1:*)",
+      "Bash(curl -s http://localhost:*)",
+      "Bash(curl -s https://localhost:*)",
+      "Bash(find *)",
+      "Bash(ls *)",
+      "Bash(npm *)",
+      "Bash(uv *)",
+      "Bash(brew *)",
+      "Bash(kill *)",
+      "Bash(pkill *)",
+      "Bash(sshpass *)"
+    ],
+    "defaultMode": "default"
+  }
+}
