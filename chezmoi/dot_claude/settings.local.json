@@ -1,6 +1,7 @@
 {
   "permissions": {
     "allow": [
+      "Bash(awk *)",
       "Bash(curl http://127.0.0.1:*)",
       "Bash(curl https://127.0.0.1:*)",
       "Bash(curl http://localhost:*)",
@@ -16,7 +17,21 @@
       "Bash(brew *)",
       "Bash(kill *)",
       "Bash(pkill *)",
-      "Bash(sshpass *)"
+      "Bash(sshpass *)",
+      "Bash(echo \"$SSHPASS\" | sshpass -d0 ssh *)",
+      "Bash(echo \"$SSHPASS\" | sshpass -d0 scp *)",
+      "Bash(echo \"$SSHPASS\" | sshpass -d0 rsync *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git ls-files*)",
+      "Bash(grep *)",
+      "Bash(tar *)",
+      "Bash(sleep *)",
+      "Bash(ruff check *)",
+      "Bash(ruff format *)",
+      "Bash(tmux *)"
     ],
     "defaultMode": "default"
   }
