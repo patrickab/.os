@@ -36,7 +36,29 @@ missing from these files.**
 - Do not duplicate information across the four summary docs.
 - If a change made during the session makes one of the four summary docs materially wrong or stale (new module, changed architecture, shifted focus), edit that doc directly with a small targeted diff. This is not `/repomix` — never touch `.docs/repo-context.md` this way. Skip the update if nothing material changed; don't rewrite a doc for a one-line change.
 - **The agent shall NEVER commit, push, or amend unless explicitly requested and instructed by the user.**
-- Spawn webapps/dev servers (`npm run dev`, `uvicorn`, etc.) in a `tmux`
-  session named after the repo's folder basename, never as a plain
-  foreground/background Bash call: `tmux new -d -s <reponame> '<cmd>' ||
-  tmux attach -t <reponame>`.
+
+## Process observability with tmux
+
+Any process that may outlive one tool call or need live or post-exit inspection
+must run in `tmux`. This includes webapps, dev servers, watchers, training,
+sweeps, benchmarks, monitors, and long-running scripts. Never launch these with
+bare backgrounding, `nohup ... &`, or `disown`. Foreground commands that finish
+within one tool call and return their complete output do not need `tmux`.
+
+- Name the session after the repository folder basename. Reuse it when it
+  exists; otherwise create it with `tmux new-session -d -s <reponame>`.
+- Use a separate, clearly named window for each process. Launch with a visible
+  completion marker and retain the pane for inspection:
+  `tmux new-window -t <reponame> -n "agent: <name>" '<command>; rc=$?; printf "\n[process exited %s]\n" "$rc"; read'`.
+- Keep output visible in the pane. Do not redirect it away; use `tee` when a
+  persistent log is also needed.
+- Immediately verify every launch with `tmux list-panes` and
+  `tmux capture-pane -p -S -100`, checking for startup errors and visible
+  progress.
+- Observe later status through `tmux capture-pane`, the pane's current command,
+  and the `[process exited N]` marker. Do not infer process status only from
+  artifacts or log files.
+- Report the session, window, `tmux attach-session -t <reponame>`, and
+  `tmux select-window -t '<reponame>:<window>'` so the user can inspect it.
+- Keep the window until its result has been inspected. Then close only that
+  window; never kill unrelated windows or a shared session.
