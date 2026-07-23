@@ -244,6 +244,7 @@ sync_opencode() {
 
     if [[ -d "$SOURCE_DIR/skills" ]]; then
         sync_dir "$SOURCE_DIR/skills/" "$global/skills/"
+        ok "skills -> opencode skills/"
     else
         rm -rf "$global/skills" 2>/dev/null || true
     fi
