@@ -2,14 +2,16 @@
 
 # Re-apply personal customizations after an Omarchy update.
 # Omarchy migrations force-overwrite some files (kitty.conf, etc).
-# This hook patches Omarchy's deployed files idempotently —
-# it never replaces a whole file, so upstream improvements are preserved.
+# This hook patches Omarchy's deployed files idempotently.
+# Files Omarchy owns and patches in place (tmux.conf, kitty.conf) must stay
+# out of chezmoi (see .chezmoiignore) -- `chezmoi apply` is a whole-file
+# replace and would silently revert upstream improvements.
 
 set -euo pipefail
 
 # 1. Deploy chezmoi-managed overlay files (input.conf, monitors.conf, kitty/personal.conf, etc).
 #    These are additive overlays, not full-file replaces.
-chezmoi apply 2>/dev/null || true
+chezmoi apply --source "$HOME/.os/chezmoi" || true
 
 # 2. kitty.conf — ensure our personal include is present (idempotent).
 #    Omarchy migrates kitty.conf on update, which strips the include line.
@@ -20,17 +22,26 @@ if [[ -f "$KITTY_CONF" ]] && ! grep -q 'include .*personal\.conf' "$KITTY_CONF";
   echo "include ~/.config/kitty/personal.conf" >> "$KITTY_CONF"
 fi
 
-# 3. hyprlock.conf — patch font_family to Thin Italic (idempotent).
+# 3. tmux.conf — ensure our personal source-file is present (idempotent).
+#    Omarchy owns and migrates tmux.conf; personal settings live in personal.conf.
+TMUX_CONF="$HOME/.config/tmux/tmux.conf"
+if [[ -f "$TMUX_CONF" ]] && ! grep -q 'source-file .*tmux/personal\.conf' "$TMUX_CONF"; then
+  echo "" >> "$TMUX_CONF"
+  echo "# Personal overrides (later directives win)" >> "$TMUX_CONF"
+  echo "source-file -q ~/.config/tmux/personal.conf" >> "$TMUX_CONF"
+fi
+
+# 4. hyprlock.conf — patch font_family to Thin Italic (idempotent).
 #    hyprlock has no include directive for single lines, so we patch in place.
 HYPRLLOCK_CONF="$HOME/.config/hypr/hyprlock.conf"
 if [[ -f "$HYPRLLOCK_CONF" ]]; then
   sed -i 's|font_family = JetBrainsMono Nerd Font$|font_family = JetBrainsMono Nerd Font Thin Italic|' "$HYPRLLOCK_CONF"
 fi
 
-# 4. git config — add sshCommand (idempotent via git config --global).
+# 5. git config — add sshCommand (idempotent via git config --global).
 git config --global core.sshCommand "ssh -o AddKeysToAgent=yes"
 
-# 5. opencode.json — merge watcher.ignore into Omarchy's version (idempotent).
+# 6. opencode.json — merge watcher.ignore into Omarchy's version (idempotent).
 OPENCODE_CONF="$HOME/.config/opencode/opencode.json"
 if [[ -f "$OPENCODE_CONF" ]] && command -v jq &>/dev/null; then
   tmp=$(mktemp)
