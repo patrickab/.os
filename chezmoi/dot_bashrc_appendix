@@ -1,8 +1,8 @@
 
 
 alias ls='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto'
-alias tree='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto --tree'
-alias treei='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto --tree --git-ignore -I "__pycache__"'
+alias tree='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto --tree -a --git-ignore -I ".git|__pycache__"'
+alias treea='eza -l --no-user --no-permissions --no-filesize --group-directories-first --icons=auto --tree -a'
 
 alias python='python3'
 
