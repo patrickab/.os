@@ -31,7 +31,8 @@
       "Bash(sleep *)",
       "Bash(ruff check *)",
       "Bash(ruff format *)",
-      "Bash(tmux *)"
+      "Bash(tmux *)",
+      "Bash(~/.os/scripts/sync-agent-configs.sh *)"
     ],
     "defaultMode": "default"
   }
