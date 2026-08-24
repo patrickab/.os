@@ -21,10 +21,10 @@ if [ "$grouped_count" -gt 1 ] && { [ "$dir" = "l" ] || [ "$dir" = "r" ]; }; then
   idx=$(echo "$active" | jq --arg addr "$addr" '.grouped | index($addr)')
   last=$((grouped_count - 1))
   if [ "$dir" = "r" ] && [ "$idx" -lt "$last" ]; then
-    hyprctl dispatch changegroupactive f
+    hyprctl dispatch "hl.dsp.group.next()"
     exit 0
   elif [ "$dir" = "l" ] && [ "$idx" -gt 0 ]; then
-    hyprctl dispatch changegroupactive b
+    hyprctl dispatch "hl.dsp.group.prev()"
     exit 0
   fi
   # else: already on the edge tab in that direction -> fall through to movefocus
@@ -50,5 +50,5 @@ has_neighbor=$(hyprctl clients -j | jq --arg addr "$addr" --argjson ws "$ws" --a
 ')
 
 if [ "$has_neighbor" = "true" ]; then
-  hyprctl dispatch movefocus "$dir"
+  hyprctl dispatch "hl.dsp.focus({direction = \"$dir\"})"
 fi

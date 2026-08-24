@@ -53,15 +53,15 @@ same_axis_has_neighbor() {
 grouped_count=$(hyprctl activewindow -j | jq '.grouped | length')
 
 if [ "$grouped_count" -gt 1 ]; then
-  hyprctl dispatch moveoutofgroup
+  hyprctl dispatch "hl.dsp.window.move({out_of_group = true})"
 
   if ! same_axis_has_neighbor; then
-    hyprctl dispatch layoutmsg togglesplit
+    hyprctl dispatch "hl.dsp.layout(\"togglesplit\")"
   fi
 
   if [ "$(has_neighbor "$dir")" = "true" ]; then
-    hyprctl dispatch swapwindow "$dir"
+    hyprctl dispatch "hl.dsp.window.swap({direction = \"$dir\"})"
   fi
 else
-  hyprctl dispatch moveintogroup "$dir"
+  hyprctl dispatch "hl.dsp.window.move({into_group = \"$dir\"})"
 fi

@@ -92,13 +92,6 @@
         - 'Google Messages'
         - 'Google Photos'
 
-    # Waybar (alacritty → kitty+htop)
-    - name: Replace alacritty with kitty+htop on waybar cpu right-click
-      lineinfile:
-        path: "{{ ansible_facts['env']['HOME'] }}/.config/waybar/config.jsonc"
-        regexp: '"on-click-right": "alacritty"'
-        line: '        "on-click-right": "kitty htop"'
-
     # Omarchy-specific packages
     - name: Install Omarchy-specific packages
       pacman:

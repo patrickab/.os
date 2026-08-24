@@ -1,0 +1,8 @@
+# Files Omarchy owns and patches in place on update.
+# chezmoi must not deploy these, or `chezmoi apply` silently reverts
+# upstream improvements delivered by omarchy migrations.
+# Personal settings for these live in a *personal.conf sourced afterwards.
+#
+# tmux.conf is NOT listed here: setup-lite.sh captures Omarchy's copy
+# (already patched with the personal.conf source line) back into this repo,
+# so chezmoi deploys the exact same tmux.conf on every OS.
