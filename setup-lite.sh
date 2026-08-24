@@ -37,6 +37,21 @@ fi
 echo "==> Applying chezmoi dotfiles (Lite Mode)..."
 "$CHEZMOI_BIN" init --source ~/.os/chezmoi --apply
 
+# Seed ~/.os/assets wallpapers into every installed theme's backgrounds dir,
+# so they're available as a background choice regardless of the active theme.
+# The theme-set.d hook (deployed above) keeps covering themes switched to
+# later; this just backfills themes that are already installed right now.
+if command -v omarchy &>/dev/null; then
+  SYNC_HOOK="$HOME/.config/omarchy/hooks/theme-set.d/sync-asset-backgrounds.sh"
+  if [ -x "$SYNC_HOOK" ]; then
+    echo "==> Syncing ~/.os/assets wallpapers into installed themes..."
+    for theme_dir in /usr/share/omarchy/themes/*/ "$HOME/.config/omarchy/themes"/*/; do
+      [ -d "$theme_dir" ] || continue
+      "$SYNC_HOOK" "$(basename "$theme_dir")"
+    done
+  fi
+fi
+
 # Enable auto-apply watcher so future edits to ~/.os/chezmoi/ take effect
 # without re-running this script.
 if systemctl --user is-enabled chezmoi-watch.path &>/dev/null; then
