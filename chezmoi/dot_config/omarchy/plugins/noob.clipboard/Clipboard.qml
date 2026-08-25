@@ -1,3 +1,9 @@
+/*
+ * User-owned Omarchy clipboard picker using menu theme tokens and fixed-row
+ * card sizing. Startup removes stale wl-paste watchers; pdeathsig ties new
+ * watchers to the shell, and a timer restarts unexpected failures.
+ */
+
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -20,9 +26,6 @@ Item {
 
   property string historyPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
   property string captureScript: root.omarchyPath + "/shell/plugins/clipboard/capture.sh"
-  // Shares the [menu] surface tokens — themes that style the menu also
-  // style the clipboard. Selected-row colors composed in the
-  // singleton so consumers drop them straight into Rectangle bindings.
   property color background: Color.menu.background
   property color foreground: Color.menu.text
   property color border: Color.menu.border
@@ -36,19 +39,11 @@ Item {
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
   property int contentSpacing: Style.spacing.md
   property int rowSpacing: Style.space(4)
-  // Card/row sizing primitive shared with Menu.qml — see CardLayout.js. Row
-  // height is derived from the aspect-locked card box so exactly
-  // cardRowCount whole rows fill the left-hand list, with no row ever
-  // clipped mid-way. The right-hand preview pane (full text/image of the
-  // selected entry) is untouched by this — it just fills whatever height
-  // that leaves, same as before.
-  readonly property real cardSizeFraction: CardLayout.CARD_SIZE_FRACTION
   readonly property int cardRowCount: 6
-  property int cardWidth: CardLayout.cardWidth(panel.width, Style.gapsOut, root.cardSizeFraction)
-  property int cardHeight: CardLayout.cardHeight(panel.height, Style.gapsOut, root.cardSizeFraction)
+  property int cardWidth: CardLayout.cardWidth(panel.width, Style.gapsOut)
+  property int cardHeight: CardLayout.cardHeight(panel.height, Style.gapsOut)
   property int rowListCapacity: CardLayout.listCapacity(root.cardHeight, root.contentMargin, root.headerHeight, root.contentSpacing)
-  property int computedRowHeight: CardLayout.rowHeight(root.rowListCapacity, root.rowSpacing, root.cardRowCount, 0)
-  property int rowHeight: Math.max(root.computedRowHeight, Style.font.body + Style.font.caption + Style.spacing.rowPaddingX * 2)
+  property int rowHeight: Math.max(CardLayout.rowHeight(root.rowListCapacity, root.rowSpacing, root.cardRowCount), Style.font.body + Style.font.caption + Style.spacing.rowPaddingX * 2)
   property int visibleRowsHeight: CardLayout.foldedUniformListHeight(displayModel.count, root.rowHeight, root.rowSpacing, root.rowListCapacity, root.rowHeight)
   property int historyLimit: 300
 
@@ -70,14 +65,6 @@ Item {
   function toggle() {
     if (root.opened) root.close()
     else root.open("{}")
-  }
-
-  function normalizeEntry(value) {
-    return ClipboardHistory.normalizeEntry(value)
-  }
-
-  function entryKey(entry) {
-    return ClipboardHistory.entryKey(entry)
   }
 
   function loadHistory(raw) {
@@ -115,7 +102,7 @@ Item {
   }
 
   function confirmClearHistory() {
-    root.history = ClipboardHistory.clearHistory()
+    root.history = []
     root.saveHistory()
     root.selectedIndex = 0
     root.cursorActive = false
@@ -271,9 +258,6 @@ Item {
     onFileChanged: reload()
   }
 
-  // Reap watchers left behind by a previous shell instance, then start our
-  // own. The pdeathsig on the watchers makes the kernel kill them whenever
-  // the shell exits, however it exits, so no further lifecycle management.
   Process {
     id: initProc
     command: ["pkill", "-f", "wl-paste .*--watch .*/shell/plugins/clipboard/capture\\.sh"]
@@ -311,9 +295,6 @@ Item {
     }
   }
 
-  // A watcher that dies takes clipboard history with it, silently: copying still
-  // works, the picker still opens, and the old entries are all still there, so
-  // nothing recorded until the next shell reload. Bring it back instead.
   Timer {
     id: watchRestartTimer
     interval: 1000
@@ -478,9 +459,6 @@ Item {
                 clip: true
                 spacing: root.rowSpacing
                 boundsBehavior: Flickable.StopAtBounds
-                // Always rest on a row boundary — no partial row at either
-                // edge, whether it settles from a flick/wheel scroll or from
-                // positionViewAtIndex.
                 snapMode: ListView.SnapToItem
 
                 delegate: Rectangle {

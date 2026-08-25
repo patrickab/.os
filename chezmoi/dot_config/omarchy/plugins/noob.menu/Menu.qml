@@ -1,3 +1,14 @@
+/*
+ * User-owned Omarchy menu plugin. The host drives open/close; watched JSONC
+ * sources are parsed once and merged with user fields taking precedence.
+ * App rows use AppLibrary, while shell providers are serialized and volatile
+ * providers refresh only on submenu entry. Guard expressions run in complete
+ * batches and queue one rerun if state changes mid-flight. The fixed card folds
+ * on row boundaries; the full-screen panel handles input while cardBackdrop
+ * alone receives compositor effects. Dmenu options use tab-separated glyph,
+ * label, and optional returned subtext fields.
+ */
+
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -10,13 +21,10 @@ import "CardLayout.js" as CardLayout
 Item {
   id: root
 
-  // Injected by omarchy-shell when this plugin is summoned.
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
   property var manifest: null
 
-  // Plugin lifecycle hooks. The host calls open(payloadJson) after
-  // `omarchy-shell shell summon omarchy.menu ...` and close() when hidden.
   property string pendingInitialMenu: "root"
 
   function open(payloadJson) {
@@ -45,9 +53,6 @@ Item {
   function ping() { return "ok" }
 
   property string fontFamily: Style.font.menuFamily
-  // JSONC menu definitions. The shell parses both at startup and merges
-  // the user file on top of the defaults, so the keybind → IPC → visible
-  // path doesn't have to shell out to bash + jq on every open.
   property string defaultMenuPath: omarchyPath + "/default/omarchy/omarchy-menu.jsonc"
   property string userMenuPath: Quickshell.env("HOME") + "/.config/omarchy/extensions/omarchy-menu.jsonc"
   property var defaultMenuItems: []
@@ -76,15 +81,10 @@ Item {
   property var providerQueue: []
   property int providerRevision: 0
 
-  // Shared application engine (entries, hidden filters, icons, launch,
-  // removal), owned by the shell and also used by the standalone launcher.
   readonly property var appLibrary: root.shell ? root.shell.appLibrary : null
   property bool deleteConfirmOpen: false
   property var deleteTarget: null
   onOpenedChanged: if (!opened) { deleteConfirmOpen = false; deleteTarget = null }
-  // Bound to the central [menu] section in shell.toml via Color.qml.
-  // Each color already includes its alpha companion (composed in the
-  // singleton), so consumers can drop them straight into a Rectangle.
   property color background: Color.menu.background
   property color foreground: Color.menu.text
   property color border: Color.menu.border
@@ -101,23 +101,11 @@ Item {
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
   property int contentSpacing: Style.spacing.md
   property int rowSpacing: Style.spacing.xs
-  // Card/row sizing primitive shared with Clipboard.qml — see CardLayout.js.
-  // Row height is NOT independently fixed: for every menu it's derived from
-  // the aspect-locked card box so exactly cardRowCount whole rows fill it,
-  // with no row ever clipped mid-way — same design for the apps list, the
-  // top-level menu, and every submenu.
-  readonly property real cardSizeFraction: CardLayout.CARD_SIZE_FRACTION
   readonly property int cardRowCount: 6
-  property int cardWidth: CardLayout.cardWidth(panel.width, Style.gapsOut, root.cardSizeFraction)
-  property int cardHeight: CardLayout.cardHeight(panel.height, Style.gapsOut, root.cardSizeFraction)
-  // Matches availableRowsHeight()'s own capacity formula exactly
-  // (contentMargin * 2, not the card's border-inclusive insets) — that
-  // function is what the fold decision is actually measured against, so
-  // cardRowCount rows only land flush with no clipped row if this uses the
-  // same arithmetic it does.
+  property int cardWidth: CardLayout.cardWidth(panel.width, Style.gapsOut)
+  property int cardHeight: CardLayout.cardHeight(panel.height, Style.gapsOut)
   property int rowListCapacity: CardLayout.listCapacity(root.cardHeight, root.contentMargin, root.headerHeight, root.contentSpacing)
-  property int computedRowHeight: CardLayout.rowHeight(root.rowListCapacity, root.rowSpacing, root.cardRowCount, 0)
-  property int baseRowHeight: Math.max(root.computedRowHeight, Style.font.body + Style.spacing.rowPaddingX * 2)
+  property int baseRowHeight: Math.max(CardLayout.rowHeight(root.rowListCapacity, root.rowSpacing, root.cardRowCount), Style.font.body + Style.spacing.rowPaddingX * 2)
   property int iconSlotWidth: Style.space(root.activeMenu === "apps" ? 46 : 36)
   property int appIconRenderSize: Style.space(32)
   property int detailRowHeight: Math.max(Style.space(58), Style.font.body + Style.font.caption + Style.spacing.rowPaddingX * 2)
@@ -153,31 +141,17 @@ Item {
     Util.execDetached(command)
   }
 
-  // Menu rows only surface their detail while a search is narrowing them;
-  // dmenu rows carry caller-supplied subtext that must always be visible.
   function rowHeightForDetail(detail) {
     return (root.filterText || root.dmenuActive) && detail ? root.detailRowHeight : root.baseRowHeight
   }
 
-  // Height the card can devote to rows before running off the screen — or
-  // past the frozen top edge once a search has pinned the card in place.
-  // Uses panel.cardTop rather than effectiveCardTop: the centered top is
-  // derived from the card height, which this value feeds.
   function availableRowsHeight() {
     var top = panel.cardTop >= 0 ? panel.cardTop : Style.gapsOut
     var available = panel.height - top - Style.gapsOut - root.contentMargin * 2 - root.headerHeight - root.contentSpacing
-    // The starting menu sets the ceiling along with the offset: drilling into
-    // a longer submenu scrolls behind the fold instead of growing the card.
     if (panel.maxRowsHeight >= 0) available = Math.min(available, panel.maxRowsHeight)
-    // The card itself is a fixed size (see cardHeight above); rows never grow
-    // it — they fold or scroll inside whatever room the fixed box leaves.
     return Math.min(available, root.rowListCapacity)
   }
 
-  // When every row fits, the list gets its full height. When they don't,
-  // stop exactly at the last row that fully fits — never show a row cut off
-  // mid-way (there's no scrim/fade cueing "more below" any more, so a
-  // partial row would just look broken instead of intentional).
   function foldedListHeight(totals, available) {
     return CardLayout.foldedListHeight(totals, available, root.baseRowHeight)
   }
@@ -223,30 +197,10 @@ Item {
     return root.items[id] || null
   }
 
-  // ------------------------------------------------------------------
-  // JSONC → normalized item array. Mirrors the bash bin's jq pipeline so
-  // the on-disk authoring format stays untouched.
-  // ------------------------------------------------------------------
-
-  function stripJsonc(raw) {
-    return MenuModel.stripJsonc(raw)
-  }
-
-  function normalizeAliases(value) {
-    return MenuModel.normalizeAliases(value)
-  }
-
-  function normalizeItem(id, raw) {
-    return MenuModel.normalizeItem(id, raw)
-  }
-
   function parseMenuJsonc(raw) {
     return MenuModel.parseMenuJsonc(raw)
   }
 
-  // Merge defaults + user extension. Later entries override earlier ones
-  // on a per-key basis (so the user can tweak label/icon/action without
-  // re-declaring the whole row).
   function rebuildItemsFromSources() {
     var mergedMenu = MenuModel.mergeMenuSources(root.defaultMenuItems, root.userMenuItems)
     root.providerRevision += 1
@@ -265,11 +219,6 @@ Item {
     }
   }
 
-  // Each known provider is a tiny bash one-liner that enumerates a list and
-  // emits one tab-delimited row per item: `label\tvalue\tcurrent`. The shell
-  // turns those into menu items children of `menuId`. A `volatile` provider
-  // re-runs every time its submenu is entered, so a font installed since the
-  // shell started shows up without restarting it.
   readonly property var providers: ({
     "fonts": {
       script: "current=$(omarchy-font-current 2>/dev/null); omarchy-font-list 2>/dev/null | while read -r f; do [[ -z $f ]] && continue; printf '%s\\t%s\\t%s\\n' \"$f\" \"$f\" \"$current\"; done",
@@ -288,9 +237,6 @@ Item {
     return MenuModel.slugify(value)
   }
 
-  // The apps provider is QML-native: rows come from the shared AppLibrary
-  // (DesktopEntries) instead of a bash enumeration, so they carry image
-  // icons, launch feedback, and uninstall support like the launcher.
   function mergeAppRows() {
     if (!root.appLibrary) return
 
@@ -365,9 +311,6 @@ Item {
       var value = parts[1] || parts[0] || ""
       var current = parts[2] || ""
       if (!label) continue
-      // Distinct values can slugify alike — Fira Code and Fira-Code both give
-      // fira-code — and a repeated id is dropped, which would silently lose a
-      // row from the list. Nudge it until it is the row's own.
       var rowId = menuId + "." + root.slugify(value)
       while (takenIds[rowId]) rowId += "-"
       takenIds[rowId] = true
@@ -408,9 +351,6 @@ Item {
     }
   }
 
-  // Entering a submenu is the one moment a volatile list is worth paying for
-  // again: it may have been reshaped by the last pick from it. Search doesn't
-  // invalidate, or every keystroke would restart the same enumeration.
   function invalidateVolatileProvider(id) {
     var entry = root.item(id)
     var spec = entry && entry.provider ? root.providers[entry.provider] : null
@@ -421,7 +361,6 @@ Item {
     var entry = root.item(id)
     if (!entry || !entry.provider || root.providersLoaded[id]) return
 
-    // Native providers don't touch providerProc, so they never need to queue.
     if (entry.provider === "apps") {
       root.startProviderForMenu(id)
       return
@@ -447,14 +386,6 @@ Item {
     }
   }
 
-  function depthFor(id) {
-    return MenuModel.depthFor(root.items, id)
-  }
-
-  function pathFor(id) {
-    return MenuModel.pathFor(root.items, id)
-  }
-
   function parentPathFor(id) {
     return MenuModel.parentPathFor(root.items, id)
   }
@@ -463,40 +394,8 @@ Item {
     return MenuModel.isDescendantOf(root.items, id, ancestorId)
   }
 
-  function childCount(id) {
-    return MenuModel.childCount(root.items, root.itemOrder, id)
-  }
-
-  // Guarded items are hidden when their `when:` evaluates false. Static
-  // submenus are also hidden when none of their descendants are visible;
-  // provider-backed menus stay visible because their rows load on demand.
   function isVisible(entry) {
     return MenuModel.isVisible(root.items, root.itemOrder, root.whenResults, entry)
-  }
-
-  // Label with the ✓ marker baked in when `checked:` evaluated truthy.
-  function labelFor(entry) {
-    return MenuModel.labelFor(entry, root.checkedResults)
-  }
-
-  function searchableToken(value) {
-    return MenuModel.searchableToken(value)
-  }
-
-  function leafIdFor(id) {
-    return MenuModel.leafIdFor(id)
-  }
-
-  function nameSearchText(entry) {
-    return MenuModel.nameSearchText(entry)
-  }
-
-  function termInSearchWords(term, text) {
-    return MenuModel.termInSearchWords(term, text)
-  }
-
-  function descriptionTextMatches(query, text) {
-    return MenuModel.descriptionTextMatches(query, text)
   }
 
   function matchesQuery(entry, query) {
@@ -508,7 +407,7 @@ Item {
   }
 
   function displayRow(entry, detail, score, section) {
-    return MenuModel.displayRow(root.items, root.itemOrder, root.checkedResults, entry, detail, score, section)
+    return MenuModel.displayRow(root.items, root.checkedResults, entry, detail, score, section)
   }
 
   function rebuildDmenuDisplay() {
@@ -522,10 +421,6 @@ Item {
 
     var query = root.filterText.trim().toLowerCase()
     for (var i = 0; i < root.dmenuOptions.length; i++) {
-      // An option is "<label>", "<glyph>\t<label>", or
-      // "<glyph>\t<label>\t<subtext>". The glyph never comes back with the
-      // selection; the subtext renders under the label, filters alongside it,
-      // and returns with the selection as a stable key for same-named rows.
       var parts = String(root.dmenuOptions[i] || "").split("\t")
       var icon = parts.length > 1 ? parts.shift() : ""
       var label = parts.shift() || ""
@@ -543,7 +438,6 @@ Item {
         target: "",
         detail: detail,
         path: "",
-        childCount: 0,
         action: "",
         provider: "",
         score: i,
@@ -588,12 +482,6 @@ Item {
         if (!root.isDescendantOf(entry.id, active)) continue
         if (!root.matchesQuery(entry, query)) continue
 
-        // The apps list is flat — every entry's parent path is the same
-        // "Apps" breadcrumb, so it adds no information there, just a
-        // redundant subtitle that also grows the row (see rowHeightForDetail)
-        // and breaks the card's exact-fit row sizing while searching. Other
-        // menus keep it: it disambiguates results pulled from different
-        // submenus.
         var detail = active === "apps" ? "" : root.parentPathFor(entry.id)
         var row = root.displayRow(entry, detail, root.searchScore(entry, query))
         if (entry.parent === active) currentRows.push(row)
@@ -620,8 +508,6 @@ Item {
         rows.push(root.displayRow(child, child.description, child.order))
       }
 
-      // DesktopEntries can reorder its values when an application starts.
-      // Keep the Apps menu alphabetical independently of provider refreshes.
       if (active === "apps") {
         rows.sort(function(a, b) {
           var aLabel = String(a.label || "").toLowerCase()
@@ -649,11 +535,6 @@ Item {
     })
   }
 
-  // The viewport is sized to hold an exact whole number of rows (see
-  // computedRowHeight/foldedListHeight), so Contain's minimal scroll to
-  // reveal the cursor row always lands on a row boundary by construction —
-  // no manual peek/overhang needed, and none wanted: a partial neighbor row
-  // would just look like a clipping bug now that there's no fade cueing it.
   function revealCursor() {
     if (displayModel.count === 0) return
     resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
@@ -807,8 +688,6 @@ Item {
     rebuildDisplay()
     invalidateVolatileProvider(activeMenu)
     loadProviderForMenu(activeMenu)
-    // The shell may start before first-install packages have finished placing
-    // their icons. Refresh here even when the desktop entry list did not change.
     if (root.appLibrary) root.appLibrary.refreshIcons()
 
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -837,13 +716,6 @@ Item {
   }
   ListModel { id: displayModel }
 
-  // ----------------------------------------------------------- route surface
-  //
-  // The menu is opened through the standard plugin lifecycle:
-  // `omarchy-shell shell summon omarchy.menu '{"menu":"system"}'`.
-  // Callers may pass a real id (`system`, `setup.power`) or an alias declared
-  // in JSONC (`power`, `reminder-set`). Unknown strings fall through to the
-  // id-as-route behavior so misspellings still attempt to open the literal id.
   function resolveRoute(input) {
     return MenuModel.resolveRoute(root.items, root.itemOrder, input)
   }
@@ -851,15 +723,11 @@ Item {
   function openRoute(initialMenu) {
     var id = root.resolveRoute(initialMenu)
     var entry = root.items[id]
-    // If the resolved id is an action (i.e. the user invoked an alias for
-    // a leaf, e.g. `omarchy menu summon screenrecord-stop`), run it directly
-    // instead of opening an action with no children.
     if (entry && entry.kind === "action" && entry.action) {
       root.cancel()
       root.runAction(entry.action)
       return "ok"
     }
-    // If it's a link (a redirect to another menu), follow the link.
     if (entry && entry.kind === "link" && entry.target) id = entry.target
     root.pendingInitialMenu = id
     root.openExistingMenu(id)
@@ -914,9 +782,6 @@ Item {
     }
   }
 
-  // The JSONC sources are watched so live edits to the default file (or the
-  // user extension at ~/.config/omarchy/extensions/omarchy-menu.jsonc) take
-  // effect without restarting the shell.
   FileView {
     id: defaultMenuFile
     path: root.defaultMenuPath
@@ -936,24 +801,11 @@ Item {
     onFileChanged: reload()
   }
 
-  // ---------------------------------------------------------------- guards
-  //
-  // `when:` (visibility) and `checked:` (✓ marker) are bash expressions the
-  // shell wasn't allowed to evaluate before the perf rewrite. Now the shell
-  // batches them into one bash subprocess per (re)load so the open path
-  // never has to wait on them.
-
-  property var whenResults: ({})       // id → true|false (allow visibility)
-  property var checkedResults: ({})    // id → true|false (show ✓)
+  property var whenResults: ({})
+  property var checkedResults: ({})
   property bool guardsPending: false
 
   function evaluateGuards() {
-    // Process ignores a command change while it is running, and `collected`
-    // belongs to the run in flight, so a second evaluation cannot overwrite
-    // the first: it would throw away the lines already read and never start.
-    // The surviving tail then lands as the whole answer, and every id lost
-    // with it goes back to showing, since a `when:` only hides on an explicit
-    // false. Wait for the run in flight and evaluate once it lands instead.
     if (guardProc.running) {
       root.guardsPending = true
       return
@@ -978,10 +830,6 @@ Item {
       onRead: function(data) { guardProc.collected += data + "\n" }
     }
     onExited: function(exitCode, exitStatus) {
-      // A batch that was killed rather than finished has only told us about
-      // the rows it reached, and a row whose `when:` went unanswered shows.
-      // Keep the last complete set rather than let a half-read one through.
-      // A signal leaves the exit code at 0, so the status is what tells us.
       if (exitCode !== 0 || exitStatus !== 0) {
         if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
         return
@@ -1007,8 +855,6 @@ Item {
       root.whenResults = nextWhen
       root.checkedResults = nextChecked
       if (root.opened) root.rebuildDisplay()
-      // Run the evaluation that had to stand aside. Deferred by a turn so the
-      // process is settled before its command is set again.
       if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
     }
   }
@@ -1022,12 +868,6 @@ Item {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore
 
-    // The card opens centered exactly as always. The first search keystroke
-    // or submenu move freezes the top line where it currently sits — from
-    // then on the card grows and shrinks downward instead of re-centering
-    // on every resize, which made the menu jump around. The rows height is
-    // frozen at the same moment, so the starting menu also caps how tall the
-    // card may grow from there. Closing unfreezes both.
     property int cardTop: -1
     property int maxRowsHeight: -1
     readonly property int centeredTop: Math.max(Style.gapsOut, Math.round((height - root.cardHeight) / 2))
@@ -1040,11 +880,6 @@ Item {
     }
     onVisibleChanged: if (!visible) { cardTop = -1; maxRowsHeight = -1 }
 
-    // Fully transparent on purpose: this "panel" surface spans the whole
-    // screen only to catch clicks-outside-to-cancel and hold keyboard focus.
-    // All visual dim/blur/xray now lives on the small "cardBackdrop" surface
-    // below, sized to just the popup — so the rest of the screen stays
-    // completely untouched.
     Rectangle {
       anchors.fill: parent
       color: "transparent"
@@ -1055,19 +890,6 @@ Item {
       onClicked: root.cancel()
     }
 
-    Text {
-      anchors.top: parent.top
-      anchors.left: parent.left
-      anchors.margins: 8
-      z: 999
-      color: "lime"
-      font.pixelSize: 22
-      text: "DEBUG panel=" + panel.width + "x" + panel.height
-        + " cardW/H=" + root.cardWidth + "x" + root.cardHeight
-        + " cardActual=" + card.width + "x" + card.height
-    }
-
-
     BorderSurface {
       id: card
       width: root.cardWidth
@@ -1075,9 +897,6 @@ Item {
       radius: root.cornerRadius
       anchors.horizontalCenter: parent.horizontalCenter
       y: panel.effectiveCardTop
-      // Transparent: the actual glass fill + blur is the cardBackdrop
-      // surface directly underneath (same size/position, see below) — this
-      // card only draws the border and content on top of it.
       color: "transparent"
       borderSpec: root.borderSpec
       padding: root.contentMargin
@@ -1194,9 +1013,6 @@ Item {
             clip: true
             spacing: root.rowSpacing
             boundsBehavior: Flickable.StopAtBounds
-            // Always rest on a row boundary — no partial row at either edge,
-            // whether it settles from a flick/wheel scroll or from
-            // revealCursor() below.
             snapMode: ListView.SnapToItem
 
             section.property: "section"
@@ -1233,7 +1049,6 @@ Item {
               required property string detail
               required property string path
               required property string action
-              required property int childCount
 
               readonly property bool hasCursor: root.cursorActive && row.index === root.selectedIndex
               readonly property bool isApp: row.kind === "app"
@@ -1244,17 +1059,6 @@ Item {
               radius: root.cornerRadius
               color: row.hasCursor ? root.selectedBackground : "transparent"
               borderSpec: row.hasCursor ? root.selectedBorderSpec : Border.none()
-
-              Rectangle {
-                visible: false
-                width: Style.space(4)
-                height: parent.height - Style.space(18)
-                radius: Math.min(root.cornerRadius, Style.space(4))
-                color: root.selectedBackground
-                anchors.left: parent.left
-                anchors.leftMargin: root.rowReservedBorderLeft + Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-              }
 
               Text {
                 id: iconText
@@ -1277,8 +1081,6 @@ Item {
                 width: root.appIconRenderSize
                 height: root.appIconRenderSize
                 fillMode: Image.PreserveAspectFit
-                // Decode at physical pixels — a logical-size decode leaves
-                // PNG icons upscaled and blurry on HiDPI displays.
                 sourceSize.width: width * Screen.devicePixelRatio
                 sourceSize.height: height * Screen.devicePixelRatio
                 source: row.isApp && root.appLibrary ? root.appLibrary.iconSource(row.appIcon) : ""
@@ -1327,16 +1129,6 @@ Item {
                 anchors.rightMargin: root.rowReservedBorderRight + Style.space(8)
                 y: contentColumn.y + labelText.y + (labelText.height - height) / 2
                 spacing: 0
-
-                Text {
-                  visible: false
-                  text: row.childCount
-                  color: root.foreground
-                  opacity: 0.45
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  anchors.verticalCenter: parent.verticalCenter
-                }
 
                 Text {
                   text: row.kind === "menu" || row.kind === "link" ? "›" : ""
@@ -1405,11 +1197,6 @@ Item {
     }
   }
 
-  // Dedicated small surface sized/positioned to exactly match the visible
-  // card, so blur/xray/dim (see the "omarchy-menu-backdrop" layer_rule in
-  // hyprland.lua) apply only directly behind the popup — the main "panel"
-  // above carries no compositor effects of its own, so the rest of the
-  // screen stays completely normal.
   PanelWindow {
     id: cardBackdrop
     visible: panel.visible

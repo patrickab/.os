@@ -1,3 +1,10 @@
+/*
+ * Pure clipboard-history normalization, deduplication, search, and display data.
+ * Search inspects at most 8 KiB per entry to protect the shell from huge pastes;
+ * activation still reads the full stored entry by index. Prefix truncation favors
+ * line boundaries so file URIs are not turned into invalid paths.
+ */
+
 function normalizeEntry(value) {
   if (typeof value === "string")
     return value.trim().length > 0 ? { type: "text", text: value } : null
@@ -79,10 +86,6 @@ function removeEntryAt(history, index) {
   return next
 }
 
-function clearHistory() {
-  return []
-}
-
 function parseEntryJson(line) {
   var raw = String(line || "").trim()
   if (!raw) return null
@@ -157,16 +160,11 @@ function fullText(entry) {
   return String(entry.text || "")
 }
 
-// The picker only ever searches and renders a prefix of an entry, so scan and
-// render just that much. A single huge paste otherwise costs hundreds of
-// megabytes of string work on every keystroke and stalls the whole shell.
-// Pasting reads the full entry back from history by index, so nothing is lost.
 var displayTextLimit = 8192
 
 function cappedEntry(entry) {
   if (!entry || entry.type !== "text" || entry.text.length <= displayTextLimit) return entry
 
-  // Cut on a line break so a file:// URI never truncates into a bogus path.
   var cut = entry.text.lastIndexOf("\n", displayTextLimit)
   return { type: "text", text: entry.text.slice(0, cut > 0 ? cut : displayTextLimit) }
 }
@@ -212,7 +210,6 @@ if (typeof module !== "undefined") {
     parseHistory: parseHistory,
     addEntry: addEntry,
     removeEntryAt: removeEntryAt,
-    clearHistory: clearHistory,
     parseEntryJson: parseEntryJson,
     searchableText: searchableText,
     previewText: previewText,

@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Captures the current clipboard as a JSON entry on stdout. In watch mode,
-# wl-paste invokes this with the payload on stdin and the mime as $1. Without
-# arguments, it snapshots the current selection itself.
+# Emit normalized clipboard JSON from stdin in watch mode or the current
+# selection otherwise. Sensitive selections are ignored; images are stored by
+# content hash so duplicate captures reuse the same file.
 
 set -o pipefail
 
