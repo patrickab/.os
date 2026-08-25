@@ -31,14 +31,7 @@ require("default.hypr.toggles")
 -- Obsidian glassy transparency (blur handled by Hyprland compositor).
 o.window("obsidian", { opacity = "0.78 0.75" })
 
--- Tried mirroring this as a windowrule on kitty too, but kitty declares a
--- fully-opaque surface once its own background_opacity is 1, and Hyprland
--- won't blur/blend behind that regardless of a windowrule opacity — kitty
--- has to declare its own alpha < 1 for the blur to render at all. See
--- background_opacity in ~/.config/kitty/personal.conf instead.
-
--- Blur/dim/xray scoped to just the popup card (see Menu.qml's cardBackdrop).
--- no_anim: skip the default layer slide-in animation.
+-- Scope the glass effect to the menu card and skip the default layer animation.
 hl.layer_rule({
   match = { namespace = "omarchy-menu-backdrop" },
   blur = true,
