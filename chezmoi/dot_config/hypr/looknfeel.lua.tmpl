@@ -33,14 +33,55 @@ hl.config({
       border_active = "rgba(00000000)",
       border_inactive = "rgba(00000000)",
     },
+
+    -- Flash briefly on group cycle/join.
+    groupbar = {
+      enabled = false,
+      height = 20,
+      gaps_in = 0,
+      gaps_out = 0,
+      -- Avoid a gap above the bar.
+      keep_upper_gap = false,
+
+      -- Exceed the border priority (10000) to render inside it.
+      priority = 10001,
+
+      indicator_height = 0,
+      -- Offset by the corner radius to align with the window.
+      indicator_gap = -8,
+
+      gradient_rounding = 8,
+      gradient_rounding_power = 2,
+      -- Round only the strip's outer corners, not every tab.
+      gradient_round_only_edges = true,
+
+      -- Blur the translucent bar backdrop.
+      blur = true,
+      -- Required for the groupbar fill (Hyprland #9352).
+      gradients = true,
+
+      font_family = "JetBrainsMono Nerd Font",
+      font_size = 11,
+      font_weight_active = "bold",
+      font_weight_inactive = "normal",
+
+      -- Updated by hypr-groupbar-theme-sync.sh.
+      text_color = "rgba(cdd6f4ff)",
+      text_color_inactive = "rgba(6c7086ff)",
+
+      col = {
+        active = "rgba(1e1e2eff)",
+        inactive = "rgba(1e1e2eff)",
+      },
+    },
   },
 })
 
 -- https://wiki.hypr.land/Configuring/Advanced-and-Cool/Animations/
--- Omarchy's default animates the border color/size transition (leaf "border")
--- on every focus change, which reads as a flicker/redraw when cycling the
--- active window within a stacked group. Turn that transition off so the
--- border cue snaps instantly instead of animating.
+-- Avoid terminal reflow while toggling the groupbar.
+hl.animation({ leaf = "windows", enabled = false })
+
+-- Avoid border flicker while cycling a group.
 hl.animation({ leaf = "border", enabled = false })
 
 -- https://wiki.hypr.land/Configuring/Basics/Variables/#decoration
@@ -50,11 +91,19 @@ hl.config({
 
     blur = {
       enabled = true,
-      -- Stronger blur on transparent surfaces than Omarchy's default (4 / 2).
-      size = 6,
-      passes = 3,
-      brightness = 0.60,
-      contrast = 0.75,
+      -- Shared glass settings.
+      size = {{ .glass.blur.size }},
+      passes = {{ .glass.blur.passes }},
+      brightness = {{ .glass.blur.brightness }},
+      contrast = {{ .glass.blur.contrast }},
+    },
+
+    -- Soften glass window edges.
+    shadow = {
+      enabled = true,
+      range = 20,
+      render_power = 3,
+      color = "rgba(00000060)",
     },
   },
 })

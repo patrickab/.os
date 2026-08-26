@@ -1,0 +1,13 @@
+# Shared glass settings.
+glass:
+  blur:
+    size: 4
+    passes: 2
+    brightness: 0.45
+    contrast: 0.85
+  kitty:
+    backgroundOpacity: 0.55
+    backgroundBlur: 10
+  obsidian:
+    opacityActive: 0.85
+    opacityInactive: 0.80

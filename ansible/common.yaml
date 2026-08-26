@@ -27,6 +27,12 @@
     state: present
   become: yes
 
+- name: Install latest CMake
+  package:
+    name: cmake
+    state: latest
+  become: yes
+
 # Homebrew Setup & Packages
 # Prevent static binary rot via Homebrew. Ensure distro-agnostic user-space installation and automatic updates.
 

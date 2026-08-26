@@ -29,12 +29,14 @@ require("default.hypr.toggles")
 -- o.window("qemu", { workspace = "5" })
 
 -- Obsidian glassy transparency (blur handled by Hyprland compositor).
-o.window("obsidian", { opacity = "0.78 0.75" })
+-- Shared glass settings.
+o.window("obsidian", { opacity = "{{ .glass.obsidian.opacityActive }} {{ .glass.obsidian.opacityInactive }}" })
 
--- Scope the glass effect to the menu card and skip the default layer animation.
+-- Keep effects to the popup card.
 hl.layer_rule({
   match = { namespace = "omarchy-menu-backdrop" },
   blur = true,
   xray = true,
+  dim_around = true,
   no_anim = true,
 })

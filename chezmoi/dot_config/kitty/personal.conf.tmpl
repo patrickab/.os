@@ -20,10 +20,10 @@ tab_bar_style fade
 # to render behind it at all; a windowrule opacity alone doesn't do it.
 # `blur_radius` was a leftover from a WezTerm config (not a real kitty
 # option, silently ignored) — kitty's actual native compositor blur option
-# is background_blur.
-background_opacity 0.33
+# is background_blur. Values use the shared glass settings.
+background_opacity {{ .glass.kitty.backgroundOpacity }}
 dynamic_background_opacity yes
-background_blur 20
+background_blur {{ .glass.kitty.backgroundBlur }}
 
 # Scrollback
 scrollback_lines 2000

@@ -22,9 +22,11 @@ if [ "$grouped_count" -gt 1 ] && { [ "$dir" = "l" ] || [ "$dir" = "r" ]; }; then
   last=$((grouped_count - 1))
   if [ "$dir" = "r" ] && [ "$idx" -lt "$last" ]; then
     hyprctl dispatch "hl.dsp.group.next()"
+    hypr-groupbar-flash.sh
     exit 0
   elif [ "$dir" = "l" ] && [ "$idx" -gt 0 ]; then
     hyprctl dispatch "hl.dsp.group.prev()"
+    hypr-groupbar-flash.sh
     exit 0
   fi
   # else: already on the edge tab in that direction -> fall through to movefocus
