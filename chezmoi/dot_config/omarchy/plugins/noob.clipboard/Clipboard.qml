@@ -317,7 +317,7 @@ Item {
 
     Rectangle {
       anchors.fill: parent
-      color: root.scrim
+      color: "transparent"
     }
 
     MouseArea {
@@ -331,7 +331,7 @@ Item {
       height: root.cardHeight
       radius: root.cornerRadius
       anchors.centerIn: parent
-      color: root.background
+      color: "transparent"
       borderSpec: root.borderSpec
       padding: root.contentMargin
 
@@ -599,6 +599,29 @@ Item {
           }
         }
       }
+    }
+  }
+
+  PanelWindow {
+    id: cardBackdrop
+    visible: panel.visible
+    anchors { top: true; left: true }
+    margins {
+      top: Math.round((panel.height - root.cardHeight) / 2)
+      left: Math.round((panel.width - root.cardWidth) / 2)
+    }
+    width: root.cardWidth
+    height: root.cardHeight
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-menu-backdrop"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    exclusionMode: ExclusionMode.Ignore
+
+    Rectangle {
+      anchors.fill: parent
+      radius: root.cornerRadius
+      color: Qt.rgba(0, 0, 0, 0.18)
     }
   }
 }
