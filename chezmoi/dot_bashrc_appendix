@@ -55,10 +55,8 @@ eval "$(oh-my-posh init bash --config ~/.ohmyposhtheme.omp.json)"
 [[ -f /home/linuxbrew/.linuxbrew/etc/profile.d/bash-preexec.sh ]] && source /home/linuxbrew/.linuxbrew/etc/profile.d/bash-preexec.sh
 eval "$(atuin init bash)"
 
-export SSH_AUTH_SOCK="$HOME/.ssh/agent.sock"
-if ! ss -a 2>/dev/null | grep -q "$SSH_AUTH_SOCK"; then
-  ssh-agent -a "$SSH_AUTH_SOCK" >/dev/null 2>&1
-fi
+# Use the SSH agent managed by the GNOME desktop session.
+export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/gcr/ssh"
 
 # --- GitHub CLI (gh) ---
 eval "$(gh completion -s bash 2>/dev/null)"
@@ -73,5 +71,9 @@ alias gact='gh run watch'
 
 # --- Bitwarden Secrets Manager ---
 alias secrets-sync='~/.os/scripts/sync-bitwarden-secrets.sh && source ~/.secrets && echo "secrets refreshed"'
+
+# Neovim
+export EDITOR=nvim
+export VISUAL=nvim
 
 [[ -f ~/.bashrc_appendix_omarchy ]] && source ~/.bashrc_appendix_omarchy
