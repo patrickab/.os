@@ -101,7 +101,11 @@
       become: yes
 
     # WiFi captive portal setup
-    - name: Run wifi redirect setup
-      ansible.builtin.shell: "{{ ansible_facts['env']['HOME'] }}/.os/ansible/omarchy/setup_wifi_redirect.sh"
-      args:
-        creates: "{{ ansible_facts['env']['HOME'] }}/.local/bin/captive-browser"
+    - name: Install captive-portal NetworkManager dispatcher script
+      ansible.builtin.copy:
+        src: omarchy/50-captive-portal
+        dest: /etc/NetworkManager/dispatcher.d/50-captive-portal
+        owner: root
+        group: root
+        mode: '0755'
+      become: yes

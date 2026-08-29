@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# NetworkManager dispatcher script: notify + open a sign-in page when
+# NetworkManager's built-in connectivity check detects a captive portal.
+#
+# Installed to /etc/NetworkManager/dispatcher.d/ (root-owned, 0755). NM invokes
+# it automatically on the "connectivity-change" action and exports
+# CONNECTIVITY_STATE (UNKNOWN|NONE|PORTAL|LIMITED|FULL). See NetworkManager(8)
+# and NetworkManager-dispatcher(8) for both.
+set -euo pipefail
+
+action="${2:-}"
+[[ "$action" == "connectivity-change" ]] || exit 0
+[[ "${CONNECTIVITY_STATE:-}" == "PORTAL" ]] || exit 0
+
+# Dispatcher scripts run as root with no session; find the active graphical
+# user session to reach their D-Bus/Wayland socket for notify-send/xdg-open.
+session_id=$(loginctl list-sessions --no-legend |
+  awk '{print $1}' |
+  while read -r id; do
+    loginctl show-session "$id" -p Type -p State --value 2>/dev/null |
+      paste -sd' ' - | grep -q '^wayland active$' && echo "$id" && break
+  done)
+[[ -n "$session_id" ]] || exit 0
+
+session_user=$(loginctl show-session "$session_id" -p Name --value)
+[[ -n "$session_user" ]] || exit 0
+uid=$(id -u "$session_user")
+
+run_as_user() {
+  runuser -u "$session_user" -- env \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+    XDG_RUNTIME_DIR="/run/user/$uid" \
+    "$@"
+}
+
+run_as_user omarchy-notification-send "Captive portal detected" \
+  "Opening sign-in page" -u normal -g "" 2>/dev/null || true
+
+run_as_user xdg-open "http://neverssl.com" >/dev/null 2>&1 &

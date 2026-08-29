@@ -39,26 +39,21 @@ missing from these files.**
 
 ## Process observability with tmux
 
-Any process that may outlive one tool call or need live or post-exit inspection
-must run in `tmux`. This includes webapps, dev servers, watchers, training,
-sweeps, benchmarks, monitors, and long-running scripts. Never launch these with
-bare backgrounding, `nohup ... &`, or `disown`. Foreground commands that finish
-within one tool call and return their complete output do not need `tmux`.
+Run any process that may outlive one tool call or needs live/post-exit
+inspection in `tmux` (servers, watchers, builds, training). Never use bare
+backgrounding, `nohup`, or `disown`. Foreground commands that finish within
+one tool call don't need tmux.
 
-- Name the session after the repository folder basename. Reuse it when it
-  exists; otherwise create it with `tmux new-session -d -s <reponame>`.
-- Use a separate, clearly named window for each process. Launch with a visible
-  completion marker and retain the pane for inspection:
-  `tmux new-window -t <reponame> -n "agent: <name>" '<command>; rc=$?; printf "\n[process exited %s]\n" "$rc"; read'`.
-- Keep output visible in the pane. Do not redirect it away; use `tee` when a
-  persistent log is also needed.
-- Immediately verify every launch with `tmux list-panes` and
-  `tmux capture-pane -p -S -100`, checking for startup errors and visible
-  progress.
-- Observe later status through `tmux capture-pane`, the pane's current command,
-  and the `[process exited N]` marker. Do not infer process status only from
-  artifacts or log files.
-- Report the session, window, `tmux attach-session -t <reponame>`, and
-  `tmux select-window -t '<reponame>:<window>'` so the user can inspect it.
-- Keep the window until its result has been inspected. Then close only that
-  window; never kill unrelated windows or a shared session.
+- One session per repo, named after its folder basename; reuse it if it exists
+  (`tmux new-session -d -s <repo>`). One clearly named window per process.
+- Canonical launch (visible marker + reliable completion signal):
+  `tmux new-window -t <repo> -n "agent: <name>" '<cmd>; rc=$?; printf "\n[process exited %s]\n" "$rc"; echo $rc > /tmp/<name>.rc; tmux wait-for -S <name>-done; read'`
+- Keep output in the pane; add `tee` only when a log file is also needed.
+  Verify the launch immediately and check status later with
+  `tmux capture-pane -p -S -100`; never infer status from artifacts/logs alone.
+- To wait for completion, block on `tmux wait-for <name>-done`, then read
+  `/tmp/<name>.rc`. Never scrape pane text for the marker: echoed commands in
+  scrollback and returned prompts cause false or missed matches.
+- Report the session/window and `tmux attach -t <repo>` to the user. Keep the
+  window until its result is inspected, then close only that window — never
+  unrelated windows or a shared session.

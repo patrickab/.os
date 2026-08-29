@@ -11,3 +11,6 @@ glass:
   obsidian:
     opacityActive: 0.85
     opacityInactive: 0.80
+  gigachadBot:
+    opacityActive: 0.85
+    opacityInactive: 0.80
