@@ -1,0 +1,13 @@
+[Unit]
+Description=Live bidirectional sync of ~/Nextcloud/linux/Documents
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.os/scripts/nextcloud-sync.sh --live linux/Documents
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

@@ -5,6 +5,14 @@ RCLONE_REMOTE_NAME="nextcloud"
 SYNC_DIR="$HOME/Nextcloud"
 CONFIG_FILE="$HOME/.config/rclone/rclone.conf"
 
+# --live <folder>: non-interactive entry point for the systemd service
+# (nextcloud-live-sync.service) — skips all prompts, requires rclone and
+# the remote to already be configured.
+LIVE_FOLDER=""
+if [[ "${1:-}" == "--live" ]]; then
+    LIVE_FOLDER="${2:?usage: $0 --live <remote-folder>}"
+fi
+
 # ── Colors ──
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -17,8 +25,19 @@ info() { echo -e "${CYAN}[INFO]${NC} $*"; }
 ok()   { echo -e "${GREEN}[OK]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 
+# ── --live: require everything already set up, skip straight to sync ──
+if [[ -n "$LIVE_FOLDER" ]]; then
+    command -v rclone &>/dev/null || { err "rclone not installed. Run '$0' interactively once to set it up."; exit 1; }
+    command -v inotifywait &>/dev/null || { err "inotify-tools not installed. Run '$0' interactively with option 3 once to install it."; exit 1; }
+    rclone listremotes 2>/dev/null | grep -q "^${RCLONE_REMOTE_NAME}:" \
+        || { err "Remote '${RCLONE_REMOTE_NAME}' not configured. Run '$0' interactively once to set it up."; exit 1; }
+    mkdir -p "$SYNC_DIR"
+    SELECTED=("$LIVE_FOLDER")
+    SYNC_CHOICE=3
+fi
+
 # ── Check/install rclone ──
-if ! command -v rclone &>/dev/null; then
+if [[ -z "$LIVE_FOLDER" ]] && ! command -v rclone &>/dev/null; then
     echo "rclone is required but not installed."
     read -rp "Install rclone now? [Y/n] " ans
     if [[ "$ans" =~ ^[Nn] ]]; then
@@ -47,6 +66,8 @@ if ! command -v rclone &>/dev/null; then
     fi
     ok "rclone installed."
 fi
+
+if [[ -z "$LIVE_FOLDER" ]]; then
 
 mkdir -p "$SYNC_DIR" "$(dirname "$CONFIG_FILE")"
 
@@ -169,8 +190,30 @@ echo ""
 echo "Sync direction:"
 echo "  1) Download only (one-way: cloud -> local)"
 echo "  2) Bidirectional sync (cloud <-> local, keep both in sync)"
+echo "  3) Live bidirectional (bisync now, then keep watching: sync on local write + 30s poll for remote changes)"
 read -rp "Choice [1] " SYNC_CHOICE
 SYNC_CHOICE="${SYNC_CHOICE:-1}"
+
+if [[ "$SYNC_CHOICE" == "3" ]] && ! command -v inotifywait &>/dev/null; then
+    info "Installing inotify-tools (needed for live sync-on-write)..."
+    if command -v apt &>/dev/null; then
+        sudo apt update && sudo apt install -y inotify-tools
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm inotify-tools
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y inotify-tools
+    elif command -v brew &>/dev/null; then
+        brew install inotify-tools
+    elif command -v zypper &>/dev/null; then
+        sudo zypper install -y inotify-tools
+    else
+        err "Could not detect package manager. Install inotify-tools manually."
+        exit 1
+    fi
+    command -v inotifywait &>/dev/null || { err "inotify-tools installation failed."; exit 1; }
+fi
+
+fi # LIVE_FOLDER
 
 # ── Perform sync ──
 echo ""
@@ -184,7 +227,7 @@ sync_folder() {
 
     info "Syncing: $remote -> $local_path"
 
-    if [[ "$SYNC_CHOICE" == "2" ]]; then
+    if [[ "$SYNC_CHOICE" == "2" || "$SYNC_CHOICE" == "3" ]]; then
         rclone bisync "$remote" "$local_path" \
             --resync --progress
     else
@@ -203,6 +246,37 @@ sync_folder() {
 for folder in "${SELECTED[@]}"; do
     sync_folder "$folder"
 done
+
+if [[ "$SYNC_CHOICE" == "3" && -z "$LIVE_FOLDER" && "${#SELECTED[@]}" -eq 1 && "${SELECTED[0]}" == "linux/Documents" ]]; then
+    echo ""
+    info "── Handing off to systemd (nextcloud-live-sync.service) instead of blocking this terminal ──"
+    if systemctl --user enable --now nextcloud-live-sync.service; then
+        loginctl enable-linger "$USER" 2>/dev/null || true
+        ok "Live sync is now running in the background. Check with:"
+        echo "  systemctl --user status nextcloud-live-sync.service"
+        echo "  journalctl --user -u nextcloud-live-sync -f"
+        exit 0
+    else
+        warn "Could not enable the systemd service (unit not deployed via chezmoi yet?). Falling back to foreground watch."
+    fi
+fi
+
+if [[ "$SYNC_CHOICE" == "3" ]]; then
+    echo ""
+    info "── Watching for changes (Ctrl+C to stop) ──"
+    WATCH_PATHS=()
+    for folder in "${SELECTED[@]}"; do
+        WATCH_PATHS+=("${SYNC_DIR}/${folder}")
+    done
+    while true; do
+        inotifywait -r -e modify,create,delete,move,close_write \
+            -t 30 "${WATCH_PATHS[@]}" >/dev/null 2>&1 || true
+        for folder in "${SELECTED[@]}"; do
+            rclone bisync "${RCLONE_REMOTE_NAME}:${folder}" "${SYNC_DIR}/${folder}" \
+                || warn "bisync for '$folder' failed, retrying next cycle"
+        done
+    done
+fi
 
 echo ""
 info "── Done ──"
