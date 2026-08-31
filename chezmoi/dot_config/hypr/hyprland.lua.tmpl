@@ -28,6 +28,14 @@ require("default.hypr.toggles")
 -- Add any other personal Hyprland configuration below.
 -- o.window("qemu", { workspace = "5" })
 
+-- Disable Omarchy's default focus-fade globally (it tags every window
+-- +default-opacity and dims unfocused ones to opacity "0.985 0.96").
+-- Placed before the obsidian/gigachad-bot/browser overrides below so their
+-- intentional per-app opacity still wins.
+o.window({ tag = "default-opacity" }, { opacity = "1.0 1.0" })
+o.window({ tag = "chromium-based-browser" }, { opacity = "1.0 1.0" })
+o.window({ tag = "firefox-based-browser" }, { opacity = "1.0 1.0" })
+
 -- Obsidian glassy transparency (blur handled by Hyprland compositor).
 -- Shared glass settings.
 o.window("obsidian", { opacity = "{{ .glass.obsidian.opacityActive }} {{ .glass.obsidian.opacityInactive }}" })
