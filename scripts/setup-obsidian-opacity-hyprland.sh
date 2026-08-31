@@ -8,8 +8,9 @@
 # uses Lua config; there's no conf file left for this script to patch).
 #
 # Usage:
-#   ./setup-obsidian-opacity-hyprland.sh                    # defaults
+#   ./setup-obsidian-opacity-hyprland.sh                    # defaults, all known vaults
 #   CSS_WINDOW_ALPHA_DARK=0.30 ./setup-obsidian-opacity-hyprland.sh  # custom values via env
+#   OBSIDIAN_VAULTS="$HOME/vault-a:$HOME/vault-b" ./setup-obsidian-opacity-hyprland.sh  # explicit list
 
 set -euo pipefail
 
@@ -31,18 +32,17 @@ CSS_INTERACTIVE_HOVER_LIGHT="${CSS_INTERACTIVE_HOVER_LIGHT:-0.35}"
 
 # ═══════════════════════════════════════════════════════════════════════════
 
-VAULT="${OBSIDIAN_VAULT:-$HOME/autowiki/obsidian}"
-SNIPPETS_DIR="$VAULT/.obsidian/snippets"
-CSS_FILE="$SNIPPETS_DIR/transparency.css"
-APPEARANCE_FILE="$VAULT/.obsidian/appearance.json"
+MASTER_CSS="$HOME/.config/obsidian-transparency/transparency.css"
 FLATPAK_ID="md.obsidian.Obsidian"
+FLATPAK_OBSIDIAN_JSON="$HOME/.var/app/$FLATPAK_ID/config/obsidian/obsidian.json"
+NATIVE_OBSIDIAN_JSON="$HOME/.config/obsidian/obsidian.json"
 
 echo "==> Setting up Obsidian blurry transparency on Hyprland"
 
-# ── 1. Obsidian CSS snippet ────────────────────────────────────────────
-echo "    Writing CSS snippet to $CSS_FILE"
-mkdir -p "$SNIPPETS_DIR"
-cat > "$CSS_FILE" << CSSEOF
+# ── 1. Shared master CSS snippet ───────────────────────────────────────
+echo "    Writing master CSS snippet to $MASTER_CSS"
+mkdir -p "$(dirname "$MASTER_CSS")"
+cat > "$MASTER_CSS" << CSSEOF
 .theme-dark {
   --background-window: rgba(0,0,0,${CSS_WINDOW_ALPHA_DARK});
   --background-modal: rgba(30,30,30,${CSS_MODAL_ALPHA_DARK});
@@ -124,12 +124,47 @@ cat > "$CSS_FILE" << CSSEOF
 }
 CSSEOF
 
-# ── 2. Enable snippet in Obsidian appearance config ────────────────────
-echo "    Enabling CSS snippet in $APPEARANCE_FILE"
-if ! grep -q transparency "$APPEARANCE_FILE" 2>/dev/null; then
-  if [[ -s "$APPEARANCE_FILE" ]] && [[ "$(cat "$APPEARANCE_FILE")" != "{}" ]]; then
-    # Merge into existing JSON (naive but functional)
-    python3 -c "
+# ── 2. Discover every vault Obsidian knows about ───────────────────────
+declare -a VAULTS=()
+if [[ -n "${OBSIDIAN_VAULTS:-}" ]]; then
+  IFS=':' read -ra VAULTS <<< "$OBSIDIAN_VAULTS"
+else
+  for registry in "$FLATPAK_OBSIDIAN_JSON" "$NATIVE_OBSIDIAN_JSON"; do
+    [[ -f "$registry" ]] || continue
+    while IFS= read -r path; do
+      VAULTS+=("$path")
+    done < <(python3 -c "
+import json
+with open('$registry') as f:
+    cfg = json.load(f)
+for v in cfg.get('vaults', {}).values():
+    print(v.get('path', ''))
+" 2>/dev/null)
+  done
+fi
+
+if [[ ${#VAULTS[@]} -eq 0 ]]; then
+  echo "    ⚠ No vaults found in $FLATPAK_OBSIDIAN_JSON or $NATIVE_OBSIDIAN_JSON."
+  echo "      Open each vault once in Obsidian first, or set OBSIDIAN_VAULTS=\"/path/a:/path/b\"."
+  exit 1
+fi
+
+# ── 3. Apply the snippet to each vault ─────────────────────────────────
+for VAULT in "${VAULTS[@]}"; do
+  [[ -d "$VAULT" ]] || { echo "    ⚠ Skipping missing vault: $VAULT"; continue; }
+
+  SNIPPETS_DIR="$VAULT/.obsidian/snippets"
+  CSS_FILE="$SNIPPETS_DIR/transparency.css"
+  APPEARANCE_FILE="$VAULT/.obsidian/appearance.json"
+
+  echo "    Vault: $VAULT"
+  mkdir -p "$SNIPPETS_DIR"
+  ln -sf "$MASTER_CSS" "$CSS_FILE"
+
+  if ! grep -q transparency "$APPEARANCE_FILE" 2>/dev/null; then
+    if [[ -s "$APPEARANCE_FILE" ]] && [[ "$(cat "$APPEARANCE_FILE")" != "{}" ]]; then
+      # Merge into existing JSON (naive but functional)
+      python3 -c "
 import json
 with open('$APPEARANCE_FILE') as f:
     cfg = json.load(f)
@@ -139,18 +174,18 @@ if 'transparency' not in snippets:
 cfg['enabledCssSnippets'] = snippets
 with open('$APPEARANCE_FILE', 'w') as f:
     json.dump(cfg, f, indent=2)
-print('  merged')
 "
-  else
-    cat > "$APPEARANCE_FILE" <<< '{
+    else
+      cat > "$APPEARANCE_FILE" <<< '{
   "enabledCssSnippets": [
     "transparency"
   ]
 }'
+    fi
   fi
-fi
+done
 
-# ── 3. Flatpak Wayland override ────────────────────────────────────────
+# ── 4. Flatpak Wayland override ────────────────────────────────────────
 if command -v flatpak &>/dev/null && flatpak list 2>/dev/null | grep -q "$FLATPAK_ID"; then
   echo "    Enabling Wayland socket for $FLATPAK_ID"
   flatpak override --user "$FLATPAK_ID" \
@@ -158,7 +193,7 @@ if command -v flatpak &>/dev/null && flatpak list 2>/dev/null | grep -q "$FLATPA
     --env=ELECTRON_OZONE_PLATFORM_HINT=wayland
 fi
 
-# ── 4. Reload Hyprland ─────────────────────────────────────────────────
+# ── 5. Reload Hyprland ─────────────────────────────────────────────────
 echo "    Reloading Hyprland config"
 hyprctl reload 2>/dev/null || true
 sleep 0.5
