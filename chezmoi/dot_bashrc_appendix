@@ -71,6 +71,7 @@ alias gact='gh run watch'
 
 # --- Bitwarden Secrets Manager ---
 alias secrets-sync='~/.os/scripts/sync-bitwarden-secrets.sh && source ~/.secrets && echo "secrets refreshed"'
+[[ -f ~/.secrets ]] && source ~/.secrets
 
 # Neovim
 export EDITOR=nvim
