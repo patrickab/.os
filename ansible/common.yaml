@@ -120,6 +120,14 @@
     PATH: "{{ ansible_env.HOME }}/.local/bin:{{ ansible_env.HOME }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_env.PATH }}"
   become: no
 
+- name: Install Pi packages
+  ansible.builtin.command:
+    cmd: pi install npm:pi-compact-transcript
+  environment:
+    PATH: "{{ ansible_env.HOME }}/.local/bin:{{ ansible_env.HOME }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_env.PATH }}"
+  ignore_errors: yes
+  become: no
+
 - name: Install Docker via Homebrew (non-Debian/RedHat; Debian/Fedora use geerlingguy.docker role)
   community.general.homebrew:
     name:

@@ -1,5 +1,11 @@
 return {
   {
+    "williamboman/mason.nvim",
+    keys = {
+      { "<leader>cm", false },
+    },
+  },
+  {
     "github/copilot.vim",
     lazy = false,
   },
@@ -40,6 +46,17 @@ return {
         "<cmd>CodeCompanion<cr>",
         mode = { "n", "v" },
         desc = "CodeCompanion Inline",
+      },
+      {
+        "<leader>cm",
+        function()
+          local codecompanion = require("codecompanion")
+          local chat = codecompanion.last_chat() or codecompanion.chat()
+          if chat then
+            require("codecompanion.interactions.chat.keymaps.change_adapter").callback(chat)
+          end
+        end,
+        desc = "CodeCompanion Model",
       },
     },
   },
