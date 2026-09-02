@@ -1,10 +1,5 @@
 ---
 name: optimize
-description:
----
-
----
-name: optimize
 description: >-
   Improve a codebase toward a stated goal — speed, memory, readability,
   docstrings, whatever "/optimize <task>" names. Break it into discrete changes,
