@@ -5,7 +5,7 @@ vim.opt.relativenumber = false
 vim.opt.ttimeout = true
 vim.opt.ttimeoutlen = 10
 vim.opt.clipboard = "unnamedplus"
-vim.opt.whichwrap:append({ "<", ">", "[", "]", "h", "l" })
+vim.opt.whichwrap:append("<,>,[,],h,l")
 vim.opt.autoindent = true
 
 -- Use the local provider normally; forward yanks through SSH to the terminal.
