@@ -12,11 +12,7 @@ packages=(
   "npm:@tintinweb/pi-subagents"
   "npm:@tintinweb/pi-tasks"
   "npm:pi-web-access"
-  "npm:pi-markdown-preview"
-  "npm:awesome-pi-themes"
   "npm:pi-rounded-tools"
-  "npm:@rokiy/pi-ui"
-  "npm:pi-open-tui"
 )
 
 for package in "${packages[@]}"; do
