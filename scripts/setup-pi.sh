@@ -13,6 +13,7 @@ packages=(
   "npm:@tintinweb/pi-tasks"
   "npm:pi-web-access"
   "npm:pi-rounded-tools"
+  "pi install npm:pi-undo-redo"
 )
 
 for package in "${packages[@]}"; do
