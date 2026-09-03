@@ -22,7 +22,7 @@ Check access with a real API call:
 glab api user
 ```
 
-Use `-R <namespace>/<project>` outside the repo. Inside the repo, prefer `glab api` placeholders like `:id`.
+Use `-R <namespace>/<project>` outside the repo. Inside the repo, prefer `glab api` placeholders like `:id`. For reads, request only needed fields with `--jq`; never load unfiltered JSON when a concise selection is sufficient.
 
 ## Issues
 
@@ -32,7 +32,7 @@ Read:
 glab issue view <iid> -R <namespace>/<project>
 glab issue view <iid> --comments -R <namespace>/<project>
 glab issue list -R <namespace>/<project>
-glab api "projects/:id/issues/<iid>"
+glab api "projects/:id/issues/<iid>" --jq '{title,description,state,labels,web_url}'
 ```
 
 Full issue URLs are accepted by `glab issue view`.
@@ -83,7 +83,7 @@ glab mr view <iid> --comments -R <namespace>/<project>
 glab mr list -R <namespace>/<project>
 glab mr diff <iid> -R <namespace>/<project>
 glab mr checkout <iid> -R <namespace>/<project>
-glab api "projects/:id/merge_requests/<iid>"
+glab api "projects/:id/merge_requests/<iid>" --jq '{title,description,state,source_branch,target_branch,web_url}'
 ```
 
 ## Pipelines
@@ -106,7 +106,7 @@ Inspect pipelines/jobs:
 glab pipeline list
 glab pipeline view <pipeline_id>
 glab ci view <pipeline_id>
-glab api "projects/:id/pipelines/<pipeline_id>/jobs"
+glab api "projects/:id/pipelines/<pipeline_id>/jobs" --jq '.[] | {id,name,status,web_url}'
 ```
 
 Trigger MR pipeline:
