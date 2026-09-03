@@ -37,6 +37,17 @@ missing from these files.**
 - If a change made during the session makes one of the four summary docs materially wrong or stale (new module, changed architecture, shifted focus), edit that doc directly with a small targeted diff. This is not `/repomix` — never touch `.docs/repo-context.md` this way. Skip the update if nothing material changed; don't rewrite a doc for a one-line change.
 - **The agent shall NEVER commit, push, or amend unless explicitly requested and instructed by the user.**
 
+## Efficient code search
+
+Prefer ripgrep (`rg`) over `grep` for repository search:
+
+- filenames: `rg --files | rg '<pattern>'`
+- words, sentences, variables: `rg -n -S '<pattern>' <path>`
+- restrict by type: `rg -n '<pattern>' -g '*.py'`
+- include hidden files when needed: `rg --hidden -n '<pattern>'`
+
+Use `rg`'s context, glob, and ignore support to keep results focused. Use `grep` only when `rg` is unavailable or for simple non-repository input.
+
 ## Process observability with tmux
 
 Run any process that may outlive one tool call or needs live/post-exit
