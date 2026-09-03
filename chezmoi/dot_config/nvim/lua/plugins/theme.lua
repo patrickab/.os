@@ -1,5 +1,5 @@
 return {
-  { "LazyVim/LazyVim", opts = { colorscheme = "oh-lucy-evening" } },
+  { "LazyVim/LazyVim", opts = { colorscheme = "oh-lucy-evening-custom" } },
 
   -- All colorscheme plugins below load lazily and are never applied directly;
   -- they just need to be installed so the picker (Themery, via <leader>uT)
@@ -59,6 +59,10 @@ return {
     config = function()
       require("themery").setup({
         themes = {
+          -- The default. Listed so Themery can switch back to it and so its
+          -- persisted state matches what is actually applied.
+          "oh-lucy-evening-custom",
+
           "gruvbox-material",
           "arctic",
           "kanso-zen", "kanso-ink", "kanso-mist",
@@ -81,6 +85,7 @@ return {
         },
         livePreview = true,
       })
+
     end,
   },
 }

@@ -29,34 +29,20 @@ return {
           pcall(vim.cmd.colorscheme, colorscheme)
         end
 
-        local transparency = config_dir .. "/plugin/after/transparency.lua"
+        local transparency = config_dir .. "/after/plugin/transparency.lua"
         if vim.fn.filereadable(transparency) == 1 then
           vim.cmd.source(transparency)
         end
         vim.cmd("redraw!")
       end
 
-      local function reload()
-        if vim.fn.exists(":Lazy") == 2 then
-          vim.cmd("Lazy reload")
-        else
-          vim.cmd.source(config_dir .. "/init.lua")
-        end
-      end
 
       local timer = uv.new_timer()
       state.timer = timer
       local function schedule_reload()
         timer:stop()
-        timer:start(150, 0, vim.schedule_wrap(reload))
+        timer:start(150, 0, vim.schedule_wrap(apply_theme))
       end
-
-      local group = vim.api.nvim_create_augroup("config_hotreload", { clear = true })
-      vim.api.nvim_create_autocmd("User", {
-        group = group,
-        pattern = "LazyReload",
-        callback = apply_theme,
-      })
 
       -- ponytail: libuv needs one watcher per directory on Linux; no plugin dependency.
       local directories = { config_dir }

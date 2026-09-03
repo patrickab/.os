@@ -52,14 +52,11 @@ if command -v omarchy &>/dev/null; then
   fi
 fi
 
-# Enable auto-apply watcher so future edits to ~/.os/chezmoi/ take effect
-# without re-running this script.
-if systemctl --user is-enabled chezmoi-watch.path &>/dev/null; then
-    :
-else
-    echo "==> Enabling chezmoi auto-apply watcher..."
-    systemctl --user daemon-reload
-    systemctl --user enable --now chezmoi-watch.path
-fi
+# Enable and start the auto-apply watcher so future edits to ~/.os/chezmoi/
+# take effect without re-running this script. Reloading every time also
+# recovers an enabled-but-stopped unit after a failed earlier run.
+echo "==> Enabling chezmoi auto-apply watcher..."
+systemctl --user daemon-reload
+systemctl --user enable --now chezmoi-watch.path
 
 echo "==> Done."

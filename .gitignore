@@ -5,3 +5,6 @@ ansible/roles/
 .agentsync/agentsync.lock
 
 .docs
+
+# Stray nvim log from a sandboxed run (socket warnings, not config output).
+nvim.log
