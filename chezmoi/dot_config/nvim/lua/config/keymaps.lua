@@ -22,3 +22,6 @@ vim.keymap.set("o", "f", function()
   end
   return "f"
 end, { expr = true, desc = "Yank file path (yf)" })
+
+-- same toggle as <leader>uh
+Snacks.toggle.inlay_hints():map("<leader>ch")

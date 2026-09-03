@@ -68,12 +68,24 @@ end
 --        Palette
 -----------------------------------------
 
+-- surfaces per 'background' (<leader>ub)
+local surface = vim.o.background == 'light' and {
+  bg     = '#1E1D23',
+  dark   = '#1A191E',
+  raised = '#29292E',
+  split  = '#2E2930',
+} or {
+  bg     = '#121116',
+  dark   = '#0E0D12',
+  raised = '#1C1B21',
+  split  = '#211F26',
+}
+
 local colors = {
   fg               = "#DED7D0",
-  bg               = "#1E1D23",
-  none             = "#1E1D23",
-  --17161B
-  dark             = '#1A191E',
+  bg               = surface.bg,
+  none             = surface.bg,
+  dark             = surface.dark,
   comment          = "#686069",
   popup_back       = '#515761',
   cursor_fg        = '#DED7D0',
@@ -85,25 +97,25 @@ local colors = {
   cl_bg            = "#524A51",
   diff_text        = '#568BB4',
   line_fg          = "#524A51",
-  line_bg          = "#1E1D23",
-  gutter_bg        = "#1E1D23",
+  line_bg          = surface.bg,
+  gutter_bg        = surface.bg,
   non_text         = "#7F737D",
   selection_bg     = "#817081",
   selection_fg     = "#615262",
   vsplit_fg        = "#cccccc",
-  vsplit_bg        = "#2E2930",
-  visual_select_bg = "#29292E",
+  vsplit_bg        = surface.split,
+  visual_select_bg = surface.raised,
 
   red_key_w  = "#FF7DA3",
   red_err    = "#D95555",
   green_func = '#7EC49D',
   green      = "#7EC49D",
   blue_type  = '#8BB8D0',
-  black1     = "#29292E",
-  black      = "#1A191E",
+  black1     = surface.raised,
+  black      = surface.dark,
   white1     = "#DED7D0",
   white      = "#DED7D0",
-  variable   = "#ABA6A4",
+  variable   = "#8C8380",
   gray_punc  = "#938884",
   gray2      = "#7F737D",
   gray1      = '#413E41',
@@ -225,8 +237,12 @@ theme.base = {
     SpellLocal          = { fg = colors.green, style = 'underline' },
     SpellRare           = { fg = colors.pink, style = 'underline' },
     Statement           = { fg = colors.red_key_w },
-    StatusLine          = { fg = colors.dark, bg = colors.gray_punc },
-    StatusLineNC        = { fg = colors.dark, bg = colors.gray_punc },
+    -- The bar's base layer, not just a fallback: a lualine section with no
+    -- background does not reach the terminal, it reveals this. Painting
+    -- gray_punc here is what made the statusline a grey slab regardless of
+    -- what lualine put on top, so it follows the transparency toggle instead.
+    StatusLine          = { fg = colors.gray_punc, bg = bg_or_none(colors.bg) },
+    StatusLineNC        = { fg = colors.line_fg, bg = bg_or_none(colors.bg) },
     StatusLineSeparator = { fg = colors.dark },
     StatusLineTerm      = { fg = colors.green_func, bg = colors.black },
     StatusLineTermNC    = { fg = colors.gray_punc, bg = colors.black },
@@ -457,6 +473,7 @@ theme.plugins = {
     -- Identifiers
     ["@variable"]           = { fg = colors.variable, style = config.italic_variables },
     ["@variable.builtin"]   = { fg = colors.pink },
+    -- needs basedpyright semantic tokens for uses, not just declarations
     ["@variable.parameter"] = { fg = colors.white },
     ["@variable.member"]    = { fg = colors.white },
     ["@property"]           = { fg = colors.white },

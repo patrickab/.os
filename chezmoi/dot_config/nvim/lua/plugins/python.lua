@@ -34,9 +34,12 @@ return {
     "neovim/nvim-lspconfig",
     opts = {
       servers = {
-        pyright = {
+        -- mason still installs it; disable to avoid a second server
+        pyright = { enabled = false },
+        -- needed for parameter semantic tokens; ruff lints, mypy types
+        basedpyright = {
           settings = {
-            python = {
+            basedpyright = {
               analysis = {
                 typeCheckingMode = "off",
               },
