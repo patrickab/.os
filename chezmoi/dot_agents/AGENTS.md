@@ -23,7 +23,7 @@ cheap-to-inject summary files that act as the agent's repository memory:
 **Do not perform repository exploration unless the required information is
 missing from these files.**
 
-**The agent must NEVER run the `/repomix` command autonomously.** It is strictly user-driven. If any `.docs/` file is missing, stale, or incomplete, the agent must point the user to run `/repomix` and wait. The agent must not run the `/repomix` command itself, nor perform repository exploration as a substitute.
+**The agent must NEVER run the `/repomix` command autonomously.** It is strictly user-driven. If any `.docs/` file is  stale incomplete notify the user to run `/repomix` - then continue.
 
 ### Conventions
 
