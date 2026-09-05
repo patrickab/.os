@@ -59,4 +59,15 @@ echo "==> Enabling chezmoi auto-apply watcher..."
 systemctl --user daemon-reload
 systemctl --user enable --now chezmoi-watch.path
 
+# Enable OpenSSH's socket-activated agent as the Arch fallback.
+if [ -r /etc/os-release ]; then
+  . /etc/os-release
+  case "${ID:-}:${ID_LIKE:-}" in
+    arch:*|omarchy:*|*:arch*)
+      echo "==> Enabling OpenSSH agent..."
+      systemctl --user enable --now ssh-agent.socket
+      ;;
+  esac
+fi
+
 echo "==> Done."

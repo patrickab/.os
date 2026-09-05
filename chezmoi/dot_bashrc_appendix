@@ -55,8 +55,12 @@ eval "$(oh-my-posh init bash --config ~/.ohmyposhtheme.omp.json)"
 [[ -f /home/linuxbrew/.linuxbrew/etc/profile.d/bash-preexec.sh ]] && source /home/linuxbrew/.linuxbrew/etc/profile.d/bash-preexec.sh
 eval "$(atuin init bash)"
 
-# Use the SSH agent managed by the GNOME desktop session.
-export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/gcr/ssh"
+# Use GNOME Keyring's agent when available, otherwise OpenSSH's user agent.
+if [[ -S "${XDG_RUNTIME_DIR:-}/gcr/ssh" ]]; then
+        export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/gcr/ssh"
+elif [[ -S "${XDG_RUNTIME_DIR:-}/ssh-agent.socket" ]]; then
+        export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
+fi
 
 # --- GitHub CLI (gh) ---
 eval "$(gh completion -s bash 2>/dev/null)"

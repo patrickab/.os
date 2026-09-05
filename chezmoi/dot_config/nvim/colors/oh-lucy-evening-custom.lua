@@ -111,6 +111,7 @@ local colors = {
   green_func = '#7EC49D',
   green      = "#7EC49D",
   blue_type  = '#8BB8D0',
+  cyan       = '#A1CCCE',
   black1     = surface.raised,
   black      = surface.dark,
   white1     = "#DED7D0",
@@ -178,7 +179,7 @@ theme.base = {
     Float       = { fg = colors.orange },
     FloatBorder = { fg = colors.gray2, bg = "NONE" },
     FoldColumn  = { fg = colors.line_fg, bg = bg_or_none(colors.bg) },
-    Folded      = { fg = colors.white, bg = colors.gray },
+    Folded      = { fg = colors.white, bg = bg_or_none(colors.gray) },
     Function    = { fg = colors.green_func },
 
     Identifier = { fg = colors.white1 },
@@ -237,10 +238,7 @@ theme.base = {
     SpellLocal          = { fg = colors.green, style = 'underline' },
     SpellRare           = { fg = colors.pink, style = 'underline' },
     Statement           = { fg = colors.red_key_w },
-    -- The bar's base layer, not just a fallback: a lualine section with no
-    -- background does not reach the terminal, it reveals this. Painting
-    -- gray_punc here is what made the statusline a grey slab regardless of
-    -- what lualine put on top, so it follows the transparency toggle instead.
+    -- The bar's base layer: a lualine section with no background reveals this.
     StatusLine          = { fg = colors.gray_punc, bg = bg_or_none(colors.bg) },
     StatusLineNC        = { fg = colors.line_fg, bg = bg_or_none(colors.bg) },
     StatusLineSeparator = { fg = colors.dark },
@@ -345,8 +343,9 @@ theme.plugins = {
     -----------------------------------------
     --   snacks.nvim: github.com/folke/snacks.nvim (LazyVim default picker)
     -----------------------------------------
+    -- Inactive guides stay dim so the cyan scope guide stands out.
     SnacksIndent          = { fg = colors.black1 },
-    SnacksIndentScope     = { fg = colors.context },
+    SnacksIndentScope     = { fg = colors.cyan },
     SnacksNormal          = { fg = colors.fg, bg = bg_or_none(colors.dark) },
     SnacksNormalNC        = { fg = colors.white1, bg = bg_or_none(colors.dark) },
     SnacksWinBar          = { fg = colors.blue_type, bg = bg_or_none(colors.dark), style = 'bold' },
@@ -416,9 +415,9 @@ theme.plugins = {
     -----------------------------------------
     --   LspDiagnostics:
     -----------------------------------------
-    LspReferenceRead  = { bg = colors.black1, style = 'bold' },
-    LspReferenceText  = { bg = colors.black1, style = 'bold' },
-    LspReferenceWrite = { bg = colors.black1, style = 'bold' },
+    LspReferenceRead  = { style = 'underline', sp = colors.cyan },
+    LspReferenceText  = { style = 'underline', sp = colors.cyan },
+    LspReferenceWrite = { style = 'underline', sp = colors.cyan },
 
     LspInlayHint                = { fg = colors.line_fg, bg = colors.black1, style = 'italic' },
     LspSignatureActiveParameter = { fg = colors.orange_wr, style = 'bold' },
@@ -594,7 +593,10 @@ theme.plugins = {
     ["@lsp.type.namespace"]     = { fg = colors.blue_type },
     ["@lsp.type.enumMember"]    = { fg = colors.orange },
     ["@lsp.type.typeParameter"] = { fg = colors.blue_type },
+    -- selfKeyword is rust-analyzer's; basedpyright emits self/clsParameter.
     ["@lsp.type.selfKeyword"]   = { fg = colors.pink },
+    ["@lsp.type.selfParameter"] = { fg = colors.pink },
+    ["@lsp.type.clsParameter"]  = { fg = colors.pink },
     ["@lsp.mod.readonly"]       = { fg = colors.pink },
     ["@lsp.mod.deprecated"]     = { style = 'strikethrough' },
     ["@lsp.typemod.variable.readonly"] = { fg = colors.pink },

@@ -37,9 +37,9 @@ return {
     cmd = { "CodeCompanion", "CodeCompanionChat", "CodeCompanionActions" },
     keys = {
       {
-        "<leader>cc",
+        "<leader>aa",
         "<cmd>CodeCompanionChat Toggle<cr>",
-        desc = "CodeCompanion Chat",
+        desc = "Agent Ask (CodeCompanion Chat)",
       },
       {
         "<leader>ci",

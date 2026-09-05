@@ -29,14 +29,26 @@ local function ruff_fix_all(bufnr)
   end
 end
 
+-- Use the project venv so mypy resolves that project's dependencies.
+local function venv_mypy(path)
+  if path == nil or path == "" then
+    return nil
+  end
+  local venv = vim.fs.find(".venv", { path = path, upward = true, type = "directory" })[1]
+  local exe = venv and vim.fs.joinpath(venv, "bin", "mypy")
+  return exe and vim.uv.fs_stat(exe) and exe or nil
+end
+
 return {
   {
     "neovim/nvim-lspconfig",
     opts = {
+      -- Keep hints opt-in; <leader>ch toggles the current buffer.
+      inlay_hints = { enabled = false },
       servers = {
-        -- mason still installs it; disable to avoid a second server
+        -- Avoid attaching a second Python server.
         pyright = { enabled = false },
-        -- needed for parameter semantic tokens; ruff lints, mypy types
+        -- basedpyright supplies tokens; ruff lints and mypy checks types.
         basedpyright = {
           settings = {
             basedpyright = {
@@ -65,5 +77,31 @@ return {
         },
       },
     },
+  },
+  {
+    "mfussenegger/nvim-lint",
+    opts = {
+      linters = {
+        mypy = {
+          cmd = function()
+            return venv_mypy(vim.api.nvim_buf_get_name(0))
+          end,
+        },
+      },
+    },
+    init = function()
+      -- Keep slow mypy runs off LazyVim's shared InsertLeave schedule.
+      local group = vim.api.nvim_create_augroup("mypy_lint", { clear = true })
+      vim.api.nvim_create_autocmd({ "BufReadPost", "BufWritePost" }, {
+        group = group,
+        callback = function(args)
+          if vim.bo[args.buf].filetype == "python" and venv_mypy(args.file) then
+            vim.api.nvim_buf_call(args.buf, function()
+              require("lint").try_lint("mypy")
+            end)
+          end
+        end,
+      })
+    end,
   },
 }

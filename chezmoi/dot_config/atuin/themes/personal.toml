@@ -1,0 +1,5 @@
+[theme]
+name = "personal"
+
+[colors]
+SyntaxCommand = "#0080ff"
