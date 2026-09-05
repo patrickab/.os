@@ -115,7 +115,31 @@ local function refresh_return_types()
   end
 end
 
+local function toggle_all_folds()
+  local ufo = require("ufo")
+  if vim.b.ufo_all_closed then
+    ufo.openAllFolds()
+  else
+    ufo.closeAllFolds()
+  end
+  vim.b.ufo_all_closed = not vim.b.ufo_all_closed
+  -- UFO applies fold changes on the next tick.
+  vim.schedule(refresh_return_types)
+end
+
 return {
+  {
+    -- which-key's "z" preset labels every native fold/spell/scroll motion;
+    -- disabling it only hides them from the popup, zt/z=/zg/etc. still work.
+    "folke/which-key.nvim",
+    opts = {
+      plugins = { presets = { z = false } },
+      spec = {
+        { "za", desc = "Toggle fold under cursor" },
+        { "zA", desc = "Toggle all folds under cursor" },
+      },
+    },
+  },
   {
     "kevinhwang91/nvim-ufo",
     dependencies = { "kevinhwang91/promise-async" },
@@ -151,21 +175,8 @@ return {
       })
     end,
     keys = {
-      {
-        "<leader>cc",
-        function()
-          local ufo = require("ufo")
-          if vim.b.ufo_all_closed then
-            ufo.openAllFolds()
-          else
-            ufo.closeAllFolds()
-          end
-          vim.b.ufo_all_closed = not vim.b.ufo_all_closed
-          -- UFO applies fold changes on the next tick.
-          vim.schedule(refresh_return_types)
-        end,
-        desc = "Code Collapse (toggle all folds)",
-      },
+      { "<leader>cc", toggle_all_folds, desc = "Code Collapse (toggle all folds)" },
+      { "zf", toggle_all_folds, desc = "Toggle all folds (open/close)" },
       {
         "<leader>cp",
         function()

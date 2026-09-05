@@ -20,9 +20,9 @@
           "type": "path"
         },
         {
-          "foreground": "#BDA9D4",
+          "foreground": "#FF7DA3",
           "options": {
-            "branch_icon": " <#BDA9D4><b>\ue0a0 </b></>"
+            "branch_icon": " <#FF7DA3><b>\ue0a0 </b></>"
           },
           "template": "<#DED7D0>on</> {{ .HEAD }}{{ if gt .StashCount 0 }} \ueb4b {{ .StashCount }}{{ end }} ",
           "type": "git"
