@@ -68,3 +68,5 @@ o.bind("SUPER + ALT + DOWN", "Swap window down", hl.dsp.window.swap({ direction 
 
 hl.unbind("SUPER + G")
 o.bind("SUPER + S", "Toggle window grouping", hl.dsp.group.toggle())
+
+o.bind("SUPER + F19", "Pen eraser click -> screenshot", "omarchy screenshot")
