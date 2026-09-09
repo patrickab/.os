@@ -19,7 +19,6 @@ return {
   { "sainnhe/everforest", lazy = true },
   { "sainnhe/sonokai", lazy = true },
   { "sainnhe/edge", lazy = true },
-  { "loctvl842/monokai-pro.nvim", lazy = true },
   { "Shatur/neovim-ayu", lazy = true },
   { "bluz71/vim-moonfly-colors", lazy = true },
   { "marko-cerovac/material.nvim", lazy = true },
