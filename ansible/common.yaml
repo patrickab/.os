@@ -115,16 +115,16 @@
 - name: Install rulesync (agentsync) via uv for cross-agent config sync
   ansible.builtin.command:
     cmd: uv tool install rulesync
-    creates: "{{ ansible_env.HOME }}/.local/bin/rulesync"
+    creates: "{{ ansible_facts['env']['HOME'] }}/.local/bin/rulesync"
   environment:
-    PATH: "{{ ansible_env.HOME }}/.local/bin:{{ ansible_env.HOME }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_env.PATH }}"
+    PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
   become: no
 
 - name: Install Pi packages
   ansible.builtin.command:
     cmd: pi install npm:pi-compact-transcript
   environment:
-    PATH: "{{ ansible_env.HOME }}/.local/bin:{{ ansible_env.HOME }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_env.PATH }}"
+    PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
   ignore_errors: yes
   become: no
 

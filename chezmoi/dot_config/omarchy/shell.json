@@ -3,36 +3,82 @@
     "centerAnchor": "omarchy.clock",
     "layout": {
       "center": [
-        { "id": "omarchy.indicators" },
-        { "format": "dddd HH:mm", "formatAlt": "d MMMM 'W'ww yyyy", "id": "omarchy.clock", "verticalFormat": "HH\\n—\\nmm" },
-        { "id": "omarchy.keyboard-layout" },
-        { "id": "omarchy.weather" },
-        { "id": "omarchy.system-update" }
+        {
+          "id": "omarchy.indicators"
+        },
+        {
+          "format": "dddd HH:mm",
+          "formatAlt": "d MMMM 'W'ww yyyy",
+          "id": "omarchy.clock",
+          "verticalFormat": "HH\\n—\\nmm"
+        },
+        {
+          "id": "omarchy.keyboard-layout"
+        },
+        {
+          "id": "omarchy.weather"
+        },
+        {
+          "id": "omarchy.system-update"
+        }
       ],
       "left": [
-        { "id": "noob.menu" },
-        { "id": "omarchy.workspaces" }
+        {
+          "id": "noob.menu"
+        },
+        {
+          "id": "omarchy.workspaces"
+        }
       ],
       "right": [
-        { "id": "omarchy.tray" },
-        { "id": "omarchy.tailscale" },
-        { "id": "omarchy.agents" },
-        { "id": "omarchy.bluetooth" },
-        { "id": "omarchy.network" },
-        { "id": "omarchy.audio" },
-        { "id": "omarchy.monitor" },
-        { "id": "omarchy.power" }
+        {
+          "id": "omarchy.tray"
+        },
+        {
+          "id": "omarchy.tailscale"
+        },
+        {
+          "id": "omarchy.agents"
+        },
+        {
+          "id": "omarchy.bluetooth"
+        },
+        {
+          "id": "omarchy.network"
+        },
+        {
+          "id": "omarchy.audio"
+        },
+        {
+          "id": "omarchy.monitor"
+        },
+        {
+          "id": "omarchy.power"
+        }
       ]
     },
     "position": "top",
     "transparent": false
   },
-  "idle": { "lock": 300, "screensaver": 150 },
+  "idle": {
+    "lock": 300,
+    "screensaver": 150
+  },
   "plugins": [
-    { "id": "io.github.atif-1402.ai-panel" },
-    { "id": "noob.clipboard" }
+    {
+      "id": "io.github.atif-1402.ai-panel"
+    },
+    {
+      "id": "noob.clipboard"
+    }
   ],
   "version": 1,
-  "disabledPlugins": ["omarchy.menu", "omarchy.clipboard"],
-  "cloneSourceRestores": ["noob.menu", "noob.clipboard"]
+  "disabledPlugins": [
+    "omarchy.clipboard",
+    "omarchy.menu"
+  ],
+  "cloneSourceRestores": [
+    "noob.clipboard",
+    "noob.menu"
+  ]
 }
