@@ -1,0 +1,17 @@
+[Desktop Entry]
+Version=1.0
+Name=Google Chrome
+GenericName=Web Browser
+Comment=Access the Internet
+Exec={{ .chezmoi.homeDir }}/.local/bin/chrome-flatpak-launcher %U
+StartupNotify=true
+Terminal=false
+Icon=com.google.Chrome
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/about;x-scheme-handler/unknown;
+Actions=new-private-window;
+
+[Desktop Action new-private-window]
+Name=New Incognito Window
+Exec={{ .chezmoi.homeDir }}/.local/bin/chrome-flatpak-launcher --incognito

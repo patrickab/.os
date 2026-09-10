@@ -1,0 +1,10 @@
+# Bot-owned state is written directly through WebDAV. Never let nextcloudcmd
+# manage it as well, or two synchronization models can create conflict copies.
+Documents/chat_history/
+Documents/Prompts/
+Documents/Mineru/
+Documents/PDFs/
+Documents/Markdown/
+Documents/LaTeX/
+Documents/Drawings/
+Documents/Architecture_Graphs/

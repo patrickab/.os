@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Thin single-token Exec target for com.google.Chrome.desktop below.
+# /usr/share/omarchy/bin/omarchy-launch-browser resolves a browser by
+# reading its .desktop file's Exec= and keeping only the first whitespace
+# token, so the Flatpak's own multi-token Exec
+# (`flatpak run --branch=... --command=... <app-id>`) doesn't work directly
+# -- this collapses it into one exec target that does.
+exec flatpak run --branch=stable --arch=x86_64 --command=/app/bin/chrome --file-forwarding com.google.Chrome "$@"
