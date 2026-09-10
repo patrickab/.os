@@ -95,9 +95,11 @@
   community.general.homebrew:
     name:
       - uv
+      - mise
       - bash-preexec
       - atuin
       - opencode
+      - oh-my-pi
       - yazi
       - neovim
       - ripgrep

@@ -1,0 +1,52 @@
+setupVersion: 2
+symbolPreset: nerd
+theme:
+  dark: oh-lucy-evening-custom
+  light: oh-lucy-evening-custom
+composer:
+  shape: borderless
+statusLine:
+  preset: custom
+  separator: pipe
+  contextLine: off
+  sessionAccent: false
+  compactThinkingLevel: true
+  showHookStatus: false
+  leftSegments: [pi, vim, model, mode, collab, path, git, pr, status, cost]
+  rightSegments: [session_name]
+  segmentOptions:
+    model: { showThinkingLevel: true }
+    path: { abbreviate: true, maxLength: 40, stripWorkPrefix: true }
+    git: { showBranch: true, showStaged: false, showUnstaged: false, showUntracked: false }
+modelRoles:
+  default: github-copilot/gpt-5.6-terra:medium
+tui:
+  textSizing: true
+  codexResetFireworks: true
+  tight: false
+  maxInlineImages: 0
+display:
+  shimmer: classic
+  hideToolActivity: true
+  showTokenUsage: false
+  showTurnTime: true
+terminal:
+  showImages: false
+hideThinkingBlock: true
+includeModelInPrompt: true
+includeWorkspaceTree: false
+retry:
+  waitForUsageReset: false
+  usageAwareFallback: false
+steeringMode: one-at-a-time
+interruptMode: immediate
+error:
+  notify: "on"
+stt:
+  enabled: false
+computer:
+  enabled: false
+task:
+  eager: preferred
+startup:
+  quiet: true
