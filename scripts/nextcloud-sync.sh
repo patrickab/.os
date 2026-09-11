@@ -10,7 +10,7 @@ UNIT_DIR="$HOME/.config/systemd/user"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 EXCLUDE_FILE="$SCRIPT_DIR/nextcloud-sync.exclude"
-SYNC_INTERVAL="${NEXTCLOUD_SYNC_INTERVAL:-5m}"
+SYNC_INTERVAL="${NEXTCLOUD_SYNC_INTERVAL:-30s}"
 
 ok() { printf '[OK] %s\n' "$*"; }
 die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
@@ -63,7 +63,7 @@ EOF
     cat > "$UNIT_DIR/nextcloud-sync.timer" <<EOF
 [Timer]
 OnUnitInactiveSec=${SYNC_INTERVAL}
-AccuracySec=30s
+AccuracySec=1s
 
 [Install]
 WantedBy=timers.target

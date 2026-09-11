@@ -50,12 +50,8 @@ fi
 
 TAILSCALE_BIN="$(command -v tailscale || true)"
 if [[ -z "$TAILSCALE_BIN" ]]; then
-  if [[ -x "/home/linuxbrew/.linuxbrew/bin/tailscale" ]]; then
-    TAILSCALE_BIN="/home/linuxbrew/.linuxbrew/bin/tailscale"
-  else
-    red "Error: tailscale binary not found after install."
-    exit 1
-  fi
+  red "Error: tailscale binary not found after running the official installer."
+  exit 1
 fi
 
 TAILSCALED_BIN="$(command -v tailscaled || true)"
