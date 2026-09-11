@@ -33,6 +33,23 @@
     state: latest
   become: yes
 
+# Mise Setup
+# Distro-agnostic version manager used for AI CLI tools (pi, oh-my-pi) that
+# aren't reliably packaged in Homebrew. Installed via the official installer
+# script so it doesn't depend on Homebrew being present.
+
+- name: Check if mise is installed
+  stat:
+    path: "{{ ansible_facts['env']['HOME'] }}/.local/bin/mise"
+  register: mise_binary
+
+- name: Install mise
+  ansible.builtin.shell: curl -fsSL https://mise.run | sh
+  args:
+    creates: "{{ ansible_facts['env']['HOME'] }}/.local/bin/mise"
+  become: no
+  when: not mise_binary.stat.exists
+
 # Homebrew Setup & Packages
 # Prevent static binary rot via Homebrew. Ensure distro-agnostic user-space installation and automatic updates.
 
@@ -95,11 +112,9 @@
   community.general.homebrew:
     name:
       - uv
-      - mise
       - bash-preexec
       - atuin
       - opencode
-      - oh-my-pi
       - yazi
       - neovim
       - ripgrep
@@ -112,6 +127,20 @@
       - repomix
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
+  become: no
+
+- name: Install pi CLI via mise (distro-agnostic GitHub release binary)
+  ansible.builtin.command:
+    cmd: mise use --global pi@latest
+  environment:
+    PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
+  become: no
+
+- name: Install oh-my-pi via mise (distro-agnostic GitHub release binary)
+  ansible.builtin.command:
+    cmd: mise use --global "github:can1357/oh-my-pi@latest"
+  environment:
+    PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
   become: no
 
 - name: Install rulesync (agentsync) via uv for cross-agent config sync

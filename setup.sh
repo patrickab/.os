@@ -45,7 +45,7 @@ elif [ -f /etc/fedora-release ]; then
 elif [ -f /etc/arch-release ]; then
     TARGET_OS="omarchy"
     echo "==> Detected Arch/Omarchy — installing prerequisites..."
-    sudo pacman -Syu --noconfirm --needed ansible curl git flatpak base-devel procps-ng file ruby-erb
+    sudo pacman -Sy --noconfirm --needed ansible curl git flatpak base-devel procps-ng file ruby-erb
 else
     echo "Unsupported OS"; exit 1
 fi
