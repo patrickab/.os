@@ -8,20 +8,39 @@ composer:
 statusLine:
   preset: custom
   separator: pipe
-  contextLine: off
+  contextLine: "off"
   sessionAccent: false
   compactThinkingLevel: true
   showHookStatus: false
-  leftSegments: [pi, vim, model, mode, collab, path, git, pr, status, cost]
-  rightSegments: [session_name]
+  leftSegments:
+    - pi
+    - vim
+    - model
+    - mode
+    - collab
+    - path
+    - git
+    - pr
+    - status
+    - cost
+  rightSegments:
+    - session_name
   segmentOptions:
-    model: { showThinkingLevel: true }
-    path: { abbreviate: true, maxLength: 40, stripWorkPrefix: true }
-    git: { showBranch: true, showStaged: false, showUnstaged: false, showUntracked: false }
+    model:
+      showThinkingLevel: true
+    path:
+      abbreviate: true
+      maxLength: 40
+      stripWorkPrefix: true
+    git:
+      showBranch: true
+      showStaged: false
+      showUnstaged: false
+      showUntracked: false
 modelRoles:
-  default: github-copilot/gpt-5.6-terra:medium
+  default: anthropic/claude-sonnet-5:medium
 tui:
-  textSizing: true
+  textSizing: false
   codexResetFireworks: true
   tight: false
   maxInlineImages: 0
@@ -47,6 +66,6 @@ stt:
 computer:
   enabled: false
 task:
-  eager: preferred
+  eager: default
 startup:
   quiet: true
