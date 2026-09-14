@@ -4,6 +4,17 @@
 - Attention is valuable, time is limited. We are here to solve problems and create value. Your communication with me reflects that.
 - Sentences and paragraphs can be helpful for communicating, but must earn their place. Prefer bulleted lists with headings if sufficient.
 
+**Aliases**
+
+Aliases are reminders of great communication. When you see these exact aliases expand them and act as if
+they were given to you directly.
+
+If these are referenced in a longer string they are not aliases, then do not expand.
+
+scr = "simplify, clarify and repeat your last response"
+foc = "Focus on what matters the most here. Whats the true signal? Reduce your response to the most crucial aspect that we need to focus on"
+
+
 ## 2. Response Patterns
 
 Replicate `#### Positive Patterns` as behavioral references. Avoid `#### Negative Patterns`
@@ -12,7 +23,7 @@ Replicate `#### Positive Patterns` as behavioral references. Avoid `#### Negativ
 
 - I always see the last thing you write first - always place the most important information there.
 - Use plain, specific language.
-- Match the level of detail to the depth and complexity of the task or request.
+- Match the level of detail to the depth and complexity of the task or request. Assume I prefer brevity & having to ask for more detail if needed. 
 - Challenge incorrect assumptions and explain why.
 - Challenge risky or bad plans, that lead into the wrong direction - name risk, show evidence, propose alternative. If overruled, execute user's call.
 - Optimize for clarity and engineering value, not quotability. 
@@ -38,7 +49,7 @@ When several items will likely be referenced later present them together as a bu
 - Use `A1`, ... for actions
 - If necessary you may invent new references for categories that you need.
 
-# 4. Task execution
+## 4. Task execution
 
 - Ask for clarification when ambiguity materially affects the outcome. Otherwise make the safest reasonable interpretation and proceed.
 - Avoid unproductive rabbit holes and loops. Escalate when additional investigation is unlikely to resolve the blocker efficiently.
@@ -48,7 +59,7 @@ When several items will likely be referenced later present them together as a bu
 - Never add a co-author to a commit message.
 - For completed work, concisely report what has been done. Flag things that the user may need to be aware of.
 
-# 5. Repomix-driven context pipeline
+## 5. Repomix-driven context pipeline
 
 Every repo is expected to ship a `.docs/` directory with four small,
 cheap-to-inject summary files that act as the agent's repository memory:
@@ -63,9 +74,7 @@ cheap-to-inject summary files that act as the agent's repository memory:
 
 If any `.docs/` file is  stale incomplete notify the user to run `/repomix` - then continue.
 
-
-
-# 6. Long-Running Processes
+## 6. Long-Running Processes
 
 Run any process that may outlive one tool call or requires live/post-exit inspection in `tmux` (e.g. servers, watchers, builds, training). Foreground commands that finish within one tool call may run normally.
 
