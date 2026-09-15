@@ -16,10 +16,12 @@ A **runbook** is a small terminal UI for a workflow: a `gum choose` menu dispatc
 - fzf with `--preview` (`bat`) — fuzzy-find **with a preview pane**; the one thing gum can't do. Reach for it only when a preview earns its place (similar files/configs), not for a short list of names
 - `gum spin --title "..." -- cmd` — spinner around a synchronous command
 - tmux (`new-session`/`new-window` + `wait-for -S`/`wait-for`) — for anything long-running or that should survive the script exiting; wrap the wait in `gum spin` instead of a silent block
+- `pick()` — a reusable picker function (fzf when present, numbered `read` fallback otherwise) written once and called from every step that needs a list choice, instead of re-deriving the fzf-or-bust branch inline per stage. See `template.sh`.
+- `header()` + `pause()` — a redrawn banner (`clear` + title, raw ANSI, no gum subprocess) plus a "press any key" gate, called at the top of every loop iteration and after every step. Gives a multi-screen runbook a stable frame instead of scrolling output.
 
-All four (`gum`, `fzf`, ripgrep for a live-grep picker) are worth checking for with `command -v` and falling back to plain bash (`select`, `read`) when absent, so a runbook never hard-depends on any of them. See `primitives-demo.sh` in this directory for a working demo of each — including the live-ripgrep-as-you-type + preview pattern, which isn't in template.sh but is worth copying into a stage that needs jump-to-line search.
+All four (`gum`, `fzf`, ripgrep for a live-grep picker) are worth checking for with `command -v` and falling back to plain bash (`select`, `read`) when absent, so a runbook never hard-depends on any of them. `pick()` bakes this fallback in once; reach for it whenever a runbook has more than one picker. See `primitives-demo.sh` in this directory for a working demo of each — including the live-ripgrep-as-you-type + preview pattern, which isn't in template.sh but is worth copying into a stage that needs jump-to-line search.
 
-**Styling rule:** if a stage calls `gum style` directly, use `--foreground`/`--bold` only. `--border`/`--padding`/`--margin` paint an opaque background on every cell they touch, which ignores terminal transparency (kitty, wezterm, alacritty) and shows as a solid box instead of blending with the user's background.
+**Styling rule:** if a stage calls `gum style` directly, use `--foreground`/`--bold` only. `--border`/`--padding`/`--margin` paint an opaque background on every cell they touch, which ignores terminal transparency (kitty, wezterm, alacritty) and shows as a solid box instead of blending with the user's background. A persistent `header()` redrawn with plain `echo -e` + raw ANSI foreground codes sidesteps the issue entirely and is cheaper than a repeated `gum style` call — use it for the banner in any looped menu.
 
 A runbook is ephemeral by default: built for one run, saved to a scratch or `scripts/` path, deleted when the job's done. Commit it only when the user wants it to live in the repo as a repeatable procedure.
 
@@ -37,7 +39,7 @@ Work out the steps and what each needs to run. Existing scripts, Makefiles, dock
 
 ### 2. Author the runbook
 
-Copy `template.sh` to the target path and reshape it — this is a demonstration of patterns, not scaffolding to preserve. Drop the menu entirely for a linear procedure; keep it for something the user will run repeatedly with different choices each time. Use whichever primitives the steps actually call for (see above).
+Copy `template.sh` to the target path and reshape it — this is a demonstration of patterns, not scaffolding to preserve. Drop the menu entirely for a linear procedure; keep the `while true` loop + `header()` + `pause()` shape for something the user will run repeatedly with different choices each time — it redraws a stable frame and returns to the menu after each step instead of exiting after one pass. Use whichever primitives the steps actually call for (see above).
 
 Hold the bar regardless of shape: check for any CLI a step depends on before using it, `gum confirm`/a y/N gate before irreversible actions, `set -euo pipefail` so failures abort loudly instead of limping on. Give any tmux window a meaningful name — what the user calls it, or what the task does (`build`, `train-256x5`) — never a generic placeholder.
 
