@@ -9,6 +9,10 @@ bold_italic_font JetBrainsMono Nerd Font Bold Italic
 # Window
 window_padding_width 2
 
+# Clipboard read access — needed for OSC 52/5522 paste (e.g. omp over SSH).
+# Trusts every host reached through this terminal.
+clipboard_control write-clipboard write-primary read-clipboard
+
 # Keybindings
 map ctrl+tab next_window
 map kitty_mod+tab previous_window
