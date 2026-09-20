@@ -23,6 +23,8 @@
       - kitty
       - rsync
       - "{{ 'xclip' if ansible_facts['os_family'] != 'RedHat' else 'xsel' }}"
+      # Xvfb: virtual X server used by cc-clip's Codex clipboard bridge over SSH.
+      - "{{ {'RedHat': 'xorg-x11-server-Xvfb', 'Archlinux': 'xorg-server-xvfb'}.get(ansible_facts['os_family'], 'xvfb') }}"
       - "{{ 'docker' if ansible_facts['os_family'] not in ['Debian', 'RedHat'] else omit }}"
     state: present
   become: yes

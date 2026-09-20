@@ -6,6 +6,8 @@
 # Usage: setup-cc-clip.sh [--claude|--codex|--opencode|--all] <host>
 #
 # <host> is the SSH Host alias (must be reachable, e.g. via Tailscale DNS).
+# Edit REMOTE_HOSTNAME / REMOTE_USER below (or override via env) to point at
+# your target machine.
 #
 # Target flags (mutually exclusive, pick at most one; default --all):
 #   --claude    Claude Code clipboard shim + claude-notify
@@ -17,8 +19,10 @@
 #   1. Ensures a ~/.ssh/config Host entry exists for <host> (created if missing).
 #   2. Installs cc-clip locally (~/.local/bin/cc-clip) if not present.
 #   3. Verifies a local clipboard tool (wl-paste / xclip) is available.
-#   4. Runs `cc-clip setup <host> <target>`, which:
-#        - starts the local cc-clip daemon (clipboard bridge on 127.0.0.1:18339),
+#   4. On Linux, starts `cc-clip serve` in the background if it isn't already
+#      running (cc-clip has no launchd-equivalent auto-start there).
+#   5. Runs `cc-clip setup <host> <target>`, which:
+#        - starts/reuses the local cc-clip daemon (clipboard bridge on 127.0.0.1:18339),
 #        - adds RemoteForward 18339 to the SSH config for <host>,
 #        - deploys the xclip/wl-paste shim on the remote host.
 #
@@ -26,6 +30,14 @@
 # while an SSH connection owns it. Paste as usual in the remote agent.
 
 set -euo pipefail
+
+# --- Editable defaults -------------------------------------------------------
+# Remote coordinates for the Host entry created in ~/.ssh/config (step 1).
+# Override per-invocation with e.g. `REMOTE_HOSTNAME=1.2.3.4 setup-cc-clip.sh ...`.
+REMOTE_HOSTNAME="${REMOTE_HOSTNAME:-100.89.120.40}"
+REMOTE_USER="${REMOTE_USER:-noob}"
+# Default target when no --claude/--codex/--opencode/--all flag is passed.
+DEFAULT_TARGET="${DEFAULT_TARGET:---all}"
 
 red()    { printf '\033[31m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -53,11 +65,7 @@ if [[ -z "$HOST" ]]; then
   exit 1
 fi
 
-TARGET="${TARGET:---all}"
-
-# Remote coordinates. Override via env if your setup differs.
-REMOTE_HOSTNAME="${REMOTE_HOSTNAME:-100.89.120.40}"
-REMOTE_USER="${REMOTE_USER:-noob}"
+TARGET="${TARGET:-$DEFAULT_TARGET}"
 
 # --- 1. Ensure ~/.ssh/config has a Host entry for $HOST ---------------------
 SSH_DIR="$HOME/.ssh"
@@ -103,7 +111,25 @@ if ! command -v wl-paste &>/dev/null && ! command -v xclip &>/dev/null; then
   exit 1
 fi
 
-# --- 4. Run cc-clip setup ----------------------------------------------------
+# --- 4. Start the local cc-clip daemon (Linux has no launchd auto-start) ----
+if [[ "$(uname -s)" == "Linux" ]] && ! curl -fsS -o /dev/null "http://127.0.0.1:18339/health" 2>/dev/null; then
+  echo "==> Starting cc-clip daemon (cc-clip serve) in the background..."
+  nohup cc-clip serve >/tmp/cc-clip-serve.log 2>&1 &
+  disown
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -fsS -o /dev/null "http://127.0.0.1:18339/health" 2>/dev/null && break
+    sleep 0.5
+  done
+  if ! curl -fsS -o /dev/null "http://127.0.0.1:18339/health" 2>/dev/null; then
+    red "Error: cc-clip serve did not come up; check /tmp/cc-clip-serve.log"
+    exit 1
+  fi
+  green "cc-clip daemon is up."
+else
+  green "cc-clip daemon already running."
+fi
+
+# --- 5. Run cc-clip setup ----------------------------------------------------
 echo "==> Running: cc-clip setup ${HOST} ${TARGET}..."
 cc-clip setup "$HOST" "$TARGET"
 
