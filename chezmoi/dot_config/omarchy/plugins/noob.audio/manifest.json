@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "noob.audio",
+  "name": "Audio",
+  "version": "1.0.0",
+  "author": "Omarchy",
+  "description": "Output and input controls, per-app mixer, Blanket ambient sounds",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Audio",
+    "description": "Volume, app mixer, and Blanket ambient sounds",
+    "category": "Audio",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.audio"
+  }
+}

@@ -202,5 +202,6 @@
       - com.google.Chrome
       - md.obsidian.Obsidian
       - com.vivaldi.Vivaldi
+      - com.rafaelmardojai.Blanket
     state: present
   become: no

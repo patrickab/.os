@@ -227,16 +227,6 @@ command_to_claude() {
     command_to_opencode "$src" "$dest" "$name"
 }
 
-sync_agents_home() {
-    info "Deploying source to ~/.agents ..."
-    local home_agents="$HOME/.agents"
-    copy_file "$SOURCE_DIR/AGENTS.md" "$home_agents/AGENTS.md"
-    if [[ -d "$SOURCE_DIR/skills" ]]; then
-        sync_dir "$SOURCE_DIR/skills/" "$home_agents/skills/"
-    fi
-    ok "~/.agents"
-}
-
 sync_opencode() {
     info "Mapping .agents -> opencode (~/.config/opencode)..."
     local global="$HOME/.config/opencode"
@@ -428,7 +418,6 @@ main() {
     echo -e "${CYAN}====================================================${NC}"
     echo ""
 
-    sync_agents_home
     sync_opencode
     sync_skills
     sync_commands
