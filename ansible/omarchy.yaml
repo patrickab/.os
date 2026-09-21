@@ -103,6 +103,14 @@
         state: present
       become: yes
 
+    - name: Install Omarchy's native Zen browser
+      ansible.builtin.command: omarchy pkg aur add zen-browser-bin
+      become: no
+
+    - name: Set native Zen as the default browser
+      ansible.builtin.command: omarchy default browser zen
+      become: no
+
     # WiFi captive portal setup
     - name: Install captive-portal NetworkManager dispatcher script
       ansible.builtin.copy:
