@@ -25,6 +25,8 @@
 #        - starts/reuses the local cc-clip daemon (clipboard bridge on 127.0.0.1:18339),
 #        - adds RemoteForward 18339 to the SSH config for <host>,
 #        - deploys the xclip/wl-paste shim on the remote host.
+#        If a prior remote cc-clip binary cannot be overwritten, retries with
+#        `--use-remote-bin` to preserve and reuse that remote installation.
 #
 # After this, open a fresh `ssh <host>` session — the RemoteForward is live only
 # while an SSH connection owns it. Paste as usual in the remote agent.
@@ -34,7 +36,7 @@ set -euo pipefail
 # --- Editable defaults -------------------------------------------------------
 # Remote coordinates for the Host entry created in ~/.ssh/config (step 1).
 # Override per-invocation with e.g. `REMOTE_HOSTNAME=1.2.3.4 setup-cc-clip.sh ...`.
-REMOTE_HOSTNAME="${REMOTE_HOSTNAME:-100.89.120.40}"
+REMOTE_HOSTNAME="${REMOTE_HOSTNAME:-100.119.229.44}"
 REMOTE_USER="${REMOTE_USER:-noob}"
 # Default target when no --claude/--codex/--opencode/--all flag is passed.
 DEFAULT_TARGET="${DEFAULT_TARGET:---all}"
@@ -131,7 +133,17 @@ fi
 
 # --- 5. Run cc-clip setup ----------------------------------------------------
 echo "==> Running: cc-clip setup ${HOST} ${TARGET}..."
-cc-clip setup "$HOST" "$TARGET"
+SETUP_LOG="$(mktemp)"
+trap 'rm -f "$SETUP_LOG"' EXIT
+
+if ! cc-clip setup "$HOST" "$TARGET" 2>&1 | tee "$SETUP_LOG"; then
+  if grep -qF 'scp failed:' "$SETUP_LOG"; then
+    yellow "Remote binary upload failed. Retrying with the existing remote cc-clip..."
+    cc-clip setup "$HOST" "$TARGET" --use-remote-bin
+  else
+    exit 1
+  fi
+fi
 
 green "==> cc-clip setup complete for ${HOST} (target: ${TARGET})."
 echo "    Open a fresh 'ssh ${HOST}' session — the RemoteForward is live only"

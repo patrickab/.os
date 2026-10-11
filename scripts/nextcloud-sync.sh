@@ -69,7 +69,7 @@ AccuracySec=1s
 WantedBy=timers.target
 EOF
     systemctl --user daemon-reload
-    systemctl --user reset-failed nextcloud-sync.service
+    systemctl --user reset-failed nextcloud-sync.service 2>/dev/null || true
     systemctl --user enable --now nextcloud-sync.timer
 }
 
