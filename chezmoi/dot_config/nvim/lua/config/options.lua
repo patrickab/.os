@@ -7,6 +7,7 @@ vim.opt.ttimeoutlen = 10
 vim.opt.clipboard = "unnamedplus"
 vim.opt.whichwrap:append("<,>,[,],h,l")
 vim.opt.autoindent = true
+vim.opt.scrolloff = 999 -- keep cursor vertically centered
 
 -- Use the local provider normally; forward yanks through SSH to the terminal.
 if vim.env.SSH_CONNECTION or vim.env.SSH_TTY or vim.env.SSH_CLIENT then
