@@ -8,6 +8,7 @@ description: Use when solving GitLab issues locally with glab, issue intake, bra
 Use this skill to solve GitLab issues in `~/git/<repo>`.
 
 For GitLab/glab API work, use the existing `gitlab` skill.  
+For worktree and branch setup, use the `worktree` skill with the issue number.  
 For code edits, assign the software engineering agent in an observable run. Prefer foreground execution where supported; otherwise keep the task visible and relay progress to the user.
 
 ## Workflow
@@ -44,34 +45,14 @@ For code edits, assign the software engineering agent in an observable run. Pref
    - ambiguities
    - suggested next step
 
-5. Derive branch name:
-   - default source branch: `dev`
-   - if title is `<prefix> | <title>`, drop `<prefix> |`
-   - format: `<issue-nr>-<slugified-title>`
-   - lowercase
-   - hyphenated
-   - no punctuation
-   - collapse repeated hyphens
+5. Prepare worktree with the `worktree` skill, passing the issue number. It derives the branch and worktree name from the issue title. Do all edits, validation, and any user-approved commits inside this worktree.
 
-6. Prepare separate worktree:
-
-   ```bash
-   git fetch --all
-   git switch <source-branch>
-   git pull
-   WORKTREE=~/git/worktrees/<repo>/<issue-nr>-<slugified-title>
-   git worktree add -b <issue-nr>-<slugified-title> "$WORKTREE" <source-branch>
-   cd "$WORKTREE"
-   ```
-
-   Do all edits, validation, and any user-approved commits inside this worktree.
-
-7. Classify issue:
+6. Classify issue:
    - implement directly if clear, local, low-risk, and acceptance criteria are obvious
    - assess first if scope, behavior, architecture, or tests are unclear
    - ask user if product/technical decisions are needed
 
-8. Direct implementation:
+7. Direct implementation:
    - assign software engineering agent
    - provide the worktree path and issue report
    - require progress updates after setup, investigation, implementation, and validation
@@ -80,26 +61,26 @@ For code edits, assign the software engineering agent in an observable run. Pref
    - run targeted validation
    - leave changes uncommitted for user review
 
-9. Assessment first:
+8. Assessment first:
    - spawn an observable assessment subagent
    - give it the concise issue report, not raw API output
    - require progress updates and a detailed final report
    - if it finds a clear solution, assign software engineering agent
    - if it finds unresolved decisions, summarize the report for the user and ask
 
-10. Validation:
-    - run targeted checks
-    - run `scripts/precommit.sh` if available
-    - inspect `git diff`
-    - inspect `git status --short`
+9. Validation:
+   - run targeted checks
+   - run `scripts/precommit.sh` if available
+   - inspect `git diff`
+   - inspect `git status --short`
 
-11. Review before commit:
+10. Review before commit:
     - after validation, show the user the concise diff summary, validation results, and proposed commit message
     - leave all changes uncommitted while iterating interactively
     - do not commit, amend, rebase, reset, or otherwise rewrite history unless the user explicitly approves the commit
     - an instruction to implement, validate, inspect, refine, or review is not commit approval
 
-12. Commit after explicit approval:
+11. Commit after explicit approval:
     - first commit format:
 
       ```text
@@ -113,7 +94,7 @@ For code edits, assign the software engineering agent in an observable run. Pref
     - never add `Co-authored-by`
     - never push unless explicitly instructed
 
-13. Final response:
+12. Final response:
     - issue
     - branch
     - worktree path

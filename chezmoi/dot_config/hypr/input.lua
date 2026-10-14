@@ -11,6 +11,10 @@ hl.config({
       -- Natural (inverse) scrolling.
       natural_scroll = true,
     },
+    -- Map stylus (tablet) input to the laptop panel, also with external monitors.
+    tablet = {
+      output = "eDP-1",
+    },
   },
 })
 
