@@ -60,8 +60,30 @@
       dnf:
         name:
           # fedora utilities go here
+          - golang
         state: present
       become: yes
+
+    # hyprmon has no Fedora package (AUR is Arch-only), so build from source
+    - name: Clone hyprmon source
+      git:
+        repo: https://github.com/erans/hyprmon.git
+        dest: "{{ ansible_facts['env']['HOME'] }}/.local/src/hyprmon"
+        depth: 1
+      become: no
+      register: hyprmon_source
+
+    - name: Check if hyprmon binary exists
+      ansible.builtin.stat:
+        path: "{{ ansible_facts['env']['HOME'] }}/.local/bin/hyprmon"
+      register: hyprmon_binary
+
+    - name: Build and install hyprmon
+      ansible.builtin.command:
+        cmd: go build -o "{{ ansible_facts['env']['HOME'] }}/.local/bin/hyprmon" .
+        chdir: "{{ ansible_facts['env']['HOME'] }}/.local/src/hyprmon"
+      become: no
+      when: hyprmon_source.changed or not hyprmon_binary.stat.exists
 
   handlers:
     - name: Reload Ollama

@@ -107,6 +107,10 @@
       ansible.builtin.command: omarchy pkg aur add zen-browser-bin
       become: no
 
+    - name: Install hyprmon from AUR
+      ansible.builtin.command: omarchy pkg aur add hyprmon-bin
+      become: no
+
     - name: Set native Zen as the default browser
       ansible.builtin.command: omarchy default browser zen
       become: no
