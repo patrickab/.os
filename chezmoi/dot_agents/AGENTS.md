@@ -25,11 +25,13 @@ Easily readable and understandable code is a core requirement, that makes life e
 - Always try to find solutions, that avoid overcomplicating or overengineering. This simplifies extensibility and reviewing code written by you and enhances our work together.
 - Always prefer concise one-line docstrings, when they are sufficient. Whenever beneficial for understandability you can add bulletpoints, but it is important to always keep docstrings concise layered and skimmable. The goal is to minimize strain and effort to understand code, if additional text/bulletpoints serves this goal add it.
 - Use self-documenting variable/function/class names - this is what allows to use one-line docstrings. This also means writing out variable names, such that within the code everything remains readable.
+- Avoid documentation/repetition of information already expressed by type hints
 - For code logic that is used to check boolean values it can be beneficial
 - Comment/Docstring style: concise, to the point, imperative mood
 - Code logic, that is required to check boolean conditions can be abstracted into boolean helper functions, that are then called inside the if condition.
+- Whenever the function name and signature obviously define what the inputs/outputs are you are not required to document the type signature. However, for non-obvious type signatures use numpy-convention and potentially usage examples to clarify what input/output variables look like.
 
-**Negative Example Docstring**
+**Negative Example Docstring (unnecessarily verbose, not skimmable)**
 
 ```python
 def fill_solids(flowfield: FlowField) -> FlowField:
@@ -46,7 +48,7 @@ def fill_solids(flowfield: FlowField) -> FlowField:
     """
 ```
 
-**Positive Example Docstring**
+**Positive Example Docstring (brings behavior to the point)**
 
 ```python
 def fill_solids(flowfield: FlowField) -> FlowField:
@@ -55,6 +57,108 @@ def fill_solids(flowfield: FlowField) -> FlowField:
     - Tadpole has no mask input, so solids need smooth values
     - `mask` stays unchanged, metrics still use fluid voxels only
     """
+```
+
+**Negative Example Docstring (repeated information, type signature already documents behavior)**
+
+```python
+def normalize(values: list[float], eps: float = 1e-8) -> list[float]:
+    """Normalize values to [0, 1].
+
+    Args:
+        values: Values to normalize.
+        eps: Minimum denominator to avoid division by zero.
+
+    Returns:
+        Values scaled to [0, 1].
+
+    Raises:
+        ValueError: If values is empty.
+    """
+```
+
+**Positive Example Docstring (no unneccessary information)**
+
+```python
+def normalize(values: list[float], eps: float = 1e-8) -> list[float]:
+    """Normalize values to [0, 1]."""
+```
+
+
+**Negative Example Docstring (missing explanation for non-obvious inputs)
+
+```python
+class DataConfig:
+    """Design selection, data source and batching."""
+
+    grid: Grid
+    source: Path | None = None
+    cache_dir: Path = Path.home() / ".cache" / "coolfrog"
+    n_samples: int | None = None
+    ranges: dict[str, Range] = field(default_factory=dict)
+    seed: int = 0
+    batch_size: int = 1
+    num_workers: int = 0
+
+```
+
+**Positive Example Docstring (explanation of non-obvious inputs using numpy style docstrings)
+
+For multiple input types document
+<variable>: <type_a> | <type_b>
+    <type_a> -> <expalanation>
+    <type_b> -> <expalanation>
+
+For types, document the actual signature
+ie `ranges : dict[str, Range] | None` instead of `ranges : dictionary of string to range or None`
+
+
+```python
+class DataConfig:
+
+    """Design selection, data source and batching.
+
+    Attributes
+    ----------
+    grid : Grid
+        Voxel grid every design is sampled onto.
+    source : Path | None
+        Path -> Local CoolData root with `metadata.parquet`
+        None -> Hugging Face.
+    path_cache : Path
+        Voxel caches, plus raw downloads when `source` is None.
+    n_samples : int | None
+        Designs drawn at random from the range matches, None = all matches.
+    ranges : dict[str, Range] | None
+        dict[str, Range] -> Defines `Range=(min, max)` filtering on metadata column str
+        None -> No restrictions.
+    seed : int
+        Seeds the `n_samples` draw and `CoolDataset.split`.
+    batch_size : int
+        Designs per batch on each GPU.
+    num_workers : int
+        Loader worker processes per GPU.
+
+    Examples
+    --------
+    >>> config = DataConfig(
+    ...     grid=Grid(resolution=(400, 80, 16)),
+    ...     n_samples=50,
+    ...     ranges={"V": (2.0, 5.0), "T1": (None, 60.0)},
+    ... )
+    >>> train, val = CoolDataset(config).split([0.9, 0.1])
+    >>> loader = CoolDataloader(train, config, shuffle=True)
+    """
+
+    grid: Grid
+    source: Path | None = None
+    path_cache: Path = Path.home() / ".cache" / "coolfrog"
+    n_samples: int | None = None
+    ranges: dict[str, Range] = field(default_factory=dict)
+    seed: int = 0
+    batch_size: int = 1
+    num_workers: int = 0
+
 ```
 
 **Negative Example Variable Names**
@@ -166,18 +270,19 @@ When several items will likely be referenced later present them together as a bu
 
 ## 6. Repomix-driven context pipeline
 
-Every repo is expected to ship a `.docs/` directory with four small,
-cheap-to-inject summary files that act as the agent's repository memory:
+Repos may ship a `.docs/` directory with small, cheap-to-inject summary files that act as the agent's repository memory:
 
 - `.docs/architecture.md`   — overall system architecture, components, data flow
 - `.docs/module-map.md`     — directory/module layout and responsibilities
 
 #### At the start of every task
 
+if `.docs` is present
+ 
 1. Read `.docs/architecture.md`
 2. Read `.docs/module-map.md`
 
-If any `.docs/` file is  stale incomplete notify the user to run `/repomix` - then continue.
+If any `.docs/` file is stale or incomplete notify the user to run `/repomix`.
 
 ## 7. Long-Running Processes
 
