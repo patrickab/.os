@@ -36,7 +36,7 @@ set -euo pipefail
 # --- Editable defaults -------------------------------------------------------
 # Remote coordinates for the Host entry created in ~/.ssh/config (step 1).
 # Override per-invocation with e.g. `REMOTE_HOSTNAME=1.2.3.4 setup-cc-clip.sh ...`.
-REMOTE_HOSTNAME="${REMOTE_HOSTNAME:-100.119.229.44}"
+REMOTE_HOSTNAME="${REMOTE_HOSTNAME:-100.96.227.106}"
 REMOTE_USER="${REMOTE_USER:-noob}"
 # Default target when no --claude/--codex/--opencode/--all flag is passed.
 DEFAULT_TARGET="${DEFAULT_TARGET:---all}"
