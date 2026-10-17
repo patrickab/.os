@@ -37,7 +37,7 @@
         {
           "foreground": "#7EC49D",
           "style": "plain",
-          "template": "\u276f",
+          "template": "{{ if or .Env.SSH_CONNECTION .Env.SSH_CLIENT .Env.SSH_TTY }}<#FF7DA3>(ssh)</> {{ end }}\u276f",
           "type": "text"
         }
       ],
