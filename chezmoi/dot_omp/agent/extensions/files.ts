@@ -95,12 +95,23 @@ export default function filesExtension(pi: ExtensionAPI): void {
 			const path = selected ? choices.find(choice => choice.label === selected)?.path : undefined;
 			if (!path) return;
 
-			const result = await pi.exec(
-				"kitty",
-				["@", "launch", "--type=overlay", "--wait-for-child-to-exit", "--cwd", ctx.cwd, "nvim", "--", path],
-				{ cwd: ctx.cwd },
-			);
-			if (result.code !== 0) ctx.ui.notify(`Neovim did not start: ${result.stderr || result.stdout}`, "error");
+			const editor = (Bun.env.VISUAL || Bun.env.EDITOR || "nvim").split(/\s+/);
+			// Same hand-over as omp's built-in Ctrl+G: stop the TUI, give the editor the terminal, resume.
+			const exitCode = await ctx.ui.custom<number>((tui, _theme, _keybindings, done) => {
+				setTimeout(async () => {
+					tui.stop();
+					let code = 1;
+					try {
+						code = await Bun.spawn([...editor, "--", path], { cwd: ctx.cwd, stdio: ["inherit", "inherit", "inherit"] }).exited;
+					} finally {
+						tui.start();
+						tui.requestRender(true);
+						done(code);
+					}
+				}, 0);
+				return { render: () => [], invalidate: () => {} };
+			});
+			if (exitCode !== 0) ctx.ui.notify(`${editor[0]} exited with code ${exitCode}`, "error");
 		},
 	});
 }
