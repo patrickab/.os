@@ -43,6 +43,8 @@ export SECURE_LOOPBACK_IP="10.200.200.1"
 # User Settings
 export TERMINAL="kitty"
 export UV_PROJECT_ENVIRONMENT=".venv"
+# Over SSH the outer kitty is not detectable from env, so force inline images (omp also uses Unicode placeholders under tmux).
+[ -n "${SSH_CONNECTION:-}" ] && export PI_FORCE_IMAGE_PROTOCOL=kitty
 
 # Homebrew & Atuin
 [ -f /home/linuxbrew/.linuxbrew/bin/brew ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"

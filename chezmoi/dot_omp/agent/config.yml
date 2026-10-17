@@ -43,14 +43,11 @@ tui:
   textSizing: false
   codexResetFireworks: true
   tight: false
-  maxInlineImages: 0
 display:
   shimmer: classic
   hideToolActivity: true
   showTokenUsage: false
   showTurnTime: true
-terminal:
-  showImages: false
 hideThinkingBlock: true
 includeModelInPrompt: true
 includeWorkspaceTree: false
