@@ -281,8 +281,9 @@ if `.docs` is present
  
 1. Read `.docs/architecture.md`
 2. Read `.docs/module-map.md`
+3. Run `git log --stat <hash>..HEAD` with the hash from their `Generated from <hash>` line to read every commit message and changed file since generation
 
-If any `.docs/` file is stale or incomplete notify the user to run `/repomix`.
+If commits since generation likely invalidate parts of the `.docs/` files or they are incomplete, notify the user to run `/repomix`.
 
 ## 7. Long-Running Processes
 
