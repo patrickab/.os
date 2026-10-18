@@ -1,16 +1,17 @@
 ---
 name: worktree
-description: "Create git worktrees with conventional or agent-chosen names. Use for /worktree, optionally with a GitLab issue number."
+description: "Create or remove git worktrees with conventional or agent-chosen names. Use for /worktree, optionally with a GitLab issue number, or /worktree remove <name>."
 ---
 
 # Worktree
 
-Create an isolated git worktree and branch, then work inside it.
+Create an isolated git worktree and branch, then work inside it. Remove it when done.
 
 ## Invocation
 
 - `/worktree <issue-nr>`: conventional naming from the GitLab issue.
 - `/worktree` (bare): agent chooses the name.
+- `/worktree remove <name>`: remove the worktree, see [Remove](#remove).
 
 ## Base branch
 
@@ -60,3 +61,18 @@ Branch name and directory name are identical: `<name>`.
 - Branch name
 - Worktree path
 - Base branch
+
+## Remove
+
+`/worktree remove <name>`, run from the main checkout `~/git/<repo>`.
+
+```bash
+git worktree remove ~/git/worktrees/$REPO/<name>
+```
+
+- Uncommitted or untracked changes: git refuses. List them, ask "Force remove? Uncommitted changes are lost." Only on yes: `git worktree remove --force …`.
+- Then ask "Delete branch `<name>`?" Default no: keep the branch.
+  - Yes: `git branch -d <name>`.
+  - Not fully merged: ask again "Branch has unmerged commits, delete anyway?" Only on yes: `git branch -D <name>`.
+- Never delete the remote branch.
+- Report: removed path, branch kept or deleted.
