@@ -569,6 +569,7 @@ theme.plugins = {
     ["@markup.link.label"]     = { fg = colors.white },
     ["@markup.link.url"]       = { fg = colors.yellow, style = 'underline' },
     ["@markup.list"]           = { fg = colors.red_key_w },
+    ["@markup.list.text"]      = { fg = colors.yellow },
     ["@markup.list.checked"]   = { fg = colors.green_func },
     ["@markup.list.unchecked"] = { fg = colors.gray2 },
 
