@@ -37,6 +37,14 @@ function yy() {
         fi
         rm -f -- "$tmp"
 }
+
+# Run the picker in a child process, then change the current shell's directory.
+worktree() {
+    local target
+    target="$("$HOME/.os/scripts/git-worktree.sh")" || return
+    [[ -n "$target" ]] || return 0
+    builtin cd -- "$target"
+}
 export OLLAMA_HOST=0.0.0.0
 export OLLAMA_API_BASE=http://host.docker.internal:11434
 export SECURE_LOOPBACK_IP="10.200.200.1"

@@ -63,3 +63,5 @@ flowchart LR
 ## Customization
 
 Add `dot_bashrc_appendix` to chezmoi directory, then `chezmoi apply`.
+
+The `worktree` shell command opens a fuzzy picker for `~/git/worktrees/<repo>/<worktree>` and changes into the selected directory. Tab cycles repositories, Enter selects, and Esc cancels. Requires `fzf`.
