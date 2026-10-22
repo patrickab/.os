@@ -21,6 +21,13 @@ require("lazy").setup({
     { import = "lazyvim.plugins.extras.lang.typescript" },
     { import = "lazyvim.plugins.extras.lang.json" },
     { import = "lazyvim.plugins.extras.ui.mini-animate" },
+    {
+      "nvim-mini/mini.animate",
+      opts = {
+        cursor = { enable = false },
+        scroll = { enable = false },
+      },
+    },
     -- import/override with your plugins
     { import = "plugins" },
   },
