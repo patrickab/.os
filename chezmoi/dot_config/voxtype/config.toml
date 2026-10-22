@@ -39,7 +39,12 @@ pause_media = true
 # volume = 0.7
 
 [whisper]
-# Model to use for transcription
+# Transcribe on the GPU box via whisper.cpp server, set up by ~/.os/scripts/setup-voxtype.sh
+# Revert to on-device transcription with mode = "local"
+mode = "remote"
+remote_endpoint = "http://100.96.227.106:8080"
+
+# Model for mode = "local", the GPU box serves its own model in remote mode
 # Options: tiny, tiny.en, base, base.en, small, small.en, medium, medium.en, large-v3, large-v3-turbo
 # .en models are English-only but faster and more accurate for English
 # large-v3-turbo is faster than large-v3 with minimal accuracy loss (recommended for GPU)
@@ -70,15 +75,10 @@ fallback_to_clipboard = true
 # 0 = fastest possible, increase if characters are dropped
 type_delay_ms = 1
 
-# Post-processing command (optional)
-# Pipe transcribed text through an external command for cleanup before output.
-# The command receives text on stdin and outputs processed text on stdout.
-# Useful for LLM-based text cleanup, grammar correction, filler word removal.
-# On any failure (timeout, error), falls back to original transcription.
-#
+# whisper-server joins segments with "\n", typed as Enter it submits prompts mid-dictation
+# Collapse newlines and doubled spaces into single spaces
 [output.post_process]
-command = "~/.local/bin/voxtype-cleanup.sh"
-timeout_ms = 15000
+command = "tr -s '\\n ' ' '"
 
 [output.notification]
 # Show notification when recording starts (hotkey pressed)
