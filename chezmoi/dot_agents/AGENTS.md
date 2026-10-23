@@ -268,22 +268,39 @@ When several items will likely be referenced later present them together as a bu
 - Never add a co-author to a commit message.
 - For completed work, concisely report what has been done. Flag things that the user may need to be aware of.
 
-## 6. Repomix-driven context pipeline
+## 6. Documentation and repository context
 
-Repos may ship a `.docs/` directory with small, cheap-to-inject summary files that act as the agent's repository memory:
+### Writing standard
 
-- `.docs/architecture.md`   — overall system architecture, components, data flow
-- `.docs/module-map.md`     — directory/module layout and responsibilities
+- Prefer concise, imperative, topic-based bullets and skimmable headings. Convey relevant information in few words without dropping constraints or failure behavior.
+- Use tables, ASCII overviews, and small conceptual snippets when clearer than prose. Do not repeat the same explanation across formats or documents.
+- Require an ASCII file tree in module-map documentation, with concise directory/module contents and responsibilities.
+- Let sentences and prose paragraphs earn their place by clarifying concepts.
+- Preserve ownership, source entry points, data flow, persistence, integration contracts, security boundaries, configuration, and important limitations.
+- Omit cosmetic UI details, exact placement, colors, spacing, animation, and incidental implementation history. Explain interactions only when needed for usage or behavior.
+- Keep setup/configuration/recovery commands in repository-maintained guides when present. Link to canonical details and remove stale or contradictory statements.
+- Use as much space as relevant information needs. Impose no token target or ceiling.
 
-#### At the start of every task
+### Context roles
 
-if `.docs` is present
- 
-1. Read `.docs/architecture.md`
-2. Read `.docs/module-map.md`
-3. Run `git log --stat <hash>..HEAD` with the hash from their `Generated from <hash>` line to read every commit message and changed file since generation
+| File | Purpose |
+| --- | --- |
+| `.docs/system-overview.md` | Purpose, concepts, capabilities, and main user workflows |
+| `.docs/architecture.md` | Components, data flow, persistence, integration contracts, and trust boundaries |
+| `.docs/module-map.md` | ASCII source tree, ownership, responsibilities, and implementation entry points |
 
-If commits since generation likely invalidate parts of the `.docs/` files or they are incomplete, notify the user to run `/repomix`.
+- Generate these three files through `/repomix`. Keep their scopes complementary.
+- Keep repository-specific guide paths and task-specific loading rules in that repository's `AGENTS.md`, not this global standard.
+
+### At the start of every task
+
+1. Read each of the three context files above whenever present, even if another is missing. Do not create absent files merely to start a task.
+2. For each distinct `Generated from <hash>` revision, run `git log --stat <hash>..HEAD` to inspect commit messages and changed files since generation. These read-only provenance checks are permitted without separate git authorization.
+3. Account for working-tree caveats and relevant current edits: the recorded commit does not describe uncommitted state.
+4. If provenance is missing/unavailable or changes invalidate the context, verify relevant facts against source and notify the user to run `/repomix`. Never treat stale summaries as authority.
+5. Load optional repository-maintained guides only when relevant to the task.
+
+- Verify operational invariants against source before documenting commands, defaults, security checks, precedence, or failure/recovery behavior. Never replace precise facts with plausible summaries.
 
 ## 7. Long-Running Processes
 
