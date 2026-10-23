@@ -18,6 +18,18 @@ hl.config({
   },
 })
 
+-- Pin touchscreens to the laptop panel. Stylus is covered by tablet.output.
+hl.device({ name = "intel-touch-host-controller-touchscreen", output = "eDP-1" })
+hl.device({ name = "iptsd-virtual-touchscreen-045e:0c1b", output = "eDP-1" })
+
+-- Re-apply touch mapping when monitors change, since it goes stale on hotplug.
+local function reload_on_monitor_change()
+  hl.exec_cmd("hyprctl reload")
+end
+
+hl.on("monitor.added", reload_on_monitor_change)
+hl.on("monitor.removed", reload_on_monitor_change)
+
 -- Remaining examples below, for reference:
 -- hl.config({
 --   input = {

@@ -17,6 +17,8 @@ require("default.hypr.omarchy")
 -- defaults so package updates can improve the defaults without rewriting your
 -- ~/.config/hypr files.
 require("hypr.monitors")
+-- HyprMon writes hyprmon.lua; loaded after monitors so its layout wins.
+require("hyprmon")
 require("hypr.input")
 require("hypr.bindings")
 require("hypr.looknfeel")
