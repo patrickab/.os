@@ -2,6 +2,8 @@
 # Sync ~/.agents canonical config to cursor, codex, opencode, and claude.
 #
 # Source of truth: chezmoi/dot_agents/  (deploys to ~/.agents/)
+#   Step 0: chezmoi apply (force) of dot_agents -> ~/.agents, skipped when run from chezmoi's own hook.
+#           Ends with a summary of added/updated/removed ~/.agents entries.
 #   AGENTS.md     -> agentsync -> CLAUDE.md, .cursor/rules/, etc.
 #   skills/       -> agent-auto skills on all tools (incl. opencode skills/)
 #   commands/     -> user-only: opencode command/*.md; others get flagged skills
@@ -26,6 +28,9 @@ SOURCE_DIR="$DOTFILES_DIR/chezmoi/dot_agents"
 OPENCODE_CONFIG="$DOTFILES_DIR/chezmoi/dot_config/opencode/opencode.jsonc"
 AGENTSYNC_DIR="$DOTFILES_DIR/.agentsync"
 RULES_FILE="$AGENTSYNC_DIR/rules.md"
+CHEZMOI_SOURCE="$DOTFILES_DIR/chezmoi"
+AGENTS_TARGET="$HOME/.agents"
+AGENTS_CHANGES=""
 
 DRY_RUN=0
 STATUS_ONLY=0
@@ -403,6 +408,81 @@ show_status() {
     done
 }
 
+# Print "<added|updated|removed><TAB><entry>" per ~/.agents item that differs from the chezmoi source.
+pending_agents_changes() {
+    local -a targets
+    mapfile -t targets < <(agents_chezmoi_targets)
+    chezmoi -S "$CHEZMOI_SOURCE" status "${targets[@]}" 2>/dev/null | awk '
+        {
+            action = substr($0, 2, 1)
+            n = split(substr($0, 4), part, "/")
+            grouped = (part[2] == "skills" || part[2] == "commands") && n >= 3
+            entry = grouped ? part[2] "/" part[3] : part[2]
+            if (n == (grouped ? 3 : 2))
+                kind[entry] = action == "A" ? "added" : action == "D" ? "removed" : "updated"
+            else if (!(entry in kind))
+                kind[entry] = "updated"
+        }
+        END { for (entry in kind) print kind[entry] "\t" entry }
+    ' | sort -t$'\t' -k2
+}
+
+# Deployable ~/.agents entries. AGENTS.md is excluded: sync_rules rewrites it via agentsync.
+agents_chezmoi_targets() {
+    local item
+    for item in "$SOURCE_DIR"/*; do
+        [[ "$(basename "$item")" == "AGENTS.md" ]] || echo "$AGENTS_TARGET/$(basename "$item")"
+    done
+}
+
+# Deploy chezmoi source -> ~/.agents (skipped inside chezmoi apply, which already did it).
+deploy_agents_dir() {
+    info "Deploying chezmoi source -> $AGENTS_TARGET..."
+    AGENTS_CHANGES=""
+    if [[ -n "${CHEZMOI:-}" ]]; then
+        ok "~/.agents already applied by the running chezmoi"
+        return 0
+    fi
+    if ! command -v chezmoi &>/dev/null; then
+        err "chezmoi not found, cannot deploy $AGENTS_TARGET"
+        exit 1
+    fi
+
+    AGENTS_CHANGES="$(pending_agents_changes)"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        info "[dry-run] would apply chezmoi source -> $AGENTS_TARGET"
+        return 0
+    fi
+
+    local -a targets
+    mapfile -t targets < <(agents_chezmoi_targets)
+    chezmoi -S "$CHEZMOI_SOURCE" apply --force "${targets[@]}"
+    ok "$AGENTS_TARGET"
+}
+
+# Summarize what was (or would be) added/updated/removed in ~/.agents.
+report_agents_changes() {
+    echo ""
+    if [[ -n "${CHEZMOI:-}" ]]; then
+        echo -e "${CYAN}Changes in ~/.agents${NC}: applied by chezmoi (see its output)"
+        return 0
+    fi
+    echo -e "${CYAN}$([[ $DRY_RUN -eq 1 ]] && echo "Would change" || echo "Changes") in ~/.agents${NC}"
+    if [[ -z "$AGENTS_CHANGES" ]]; then
+        echo "  (none)"
+        return 0
+    fi
+
+    local kind entry
+    while IFS=$'\t' read -r kind entry; do
+        case "$kind" in
+            added)   echo -e "  ${GREEN}+ added${NC}    $entry" ;;
+            removed) echo -e "  ${RED}- removed${NC}  $entry" ;;
+            *)       echo -e "  ${YELLOW}~ updated${NC}  $entry" ;;
+        esac
+    done <<< "$AGENTS_CHANGES"
+}
+
 main() {
     require_source
 
@@ -418,10 +498,12 @@ main() {
     echo -e "${CYAN}====================================================${NC}"
     echo ""
 
+    deploy_agents_dir
     sync_opencode
     sync_skills
     sync_commands
     sync_rules
+    report_agents_changes
 
     echo ""
     ok "Agent config sync complete."
