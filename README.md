@@ -65,3 +65,13 @@ flowchart LR
 Add `dot_bashrc_appendix` to chezmoi directory, then `chezmoi apply`.
 
 The `worktree` shell command opens a fuzzy picker for `~/git/worktrees/<repo>/<worktree>` and changes into the selected directory. Tab cycles repositories, Enter selects, and Esc cancels. Requires `fzf`.
+
+### Monitors
+
+- Repository defaults in `chezmoi/dot_config/hypr/monitors.lua` enable unknown monitors at their preferred mode with automatic placement.
+- Optional local overrides in `~/.config/hypr/hyprmon.lua` load afterward. Missing overrides are allowed, and edits are reread on each config reload.
+- Run `hyprmon`, adjust the layout, press `A` to apply, then `S` to save persistently. Saved settings load without reopening HyprMon.
+- For connector-independent matching, select a monitor, press `C`, enable **Write as desc**, confirm with Enter, then save with `S`. Preferences live in `~/.config/hyprmon/settings.json`.
+- Local layouts and HyprMon preferences are excluded from chezmoi deployment. No per-monitor repository entry is needed.
+- Apply manual configuration edits with `hyprctl reload`. To reset all saved overrides, remove the monitor rules from the local `hyprmon.lua` and reload.
+- The Lenovo is currently saved locally at the stable 1920×1080/60 Hz setting. Its native-4K link failure remains unresolved.

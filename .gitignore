@@ -8,3 +8,10 @@ ansible/roles/
 
 # Stray nvim log from a sandboxed run (socket warnings, not config output).
 nvim.log
+
+# Interactive-learning skill apps: dot_gitignore deploys their .gitignore, these keep local installs out of this repo.
+chezmoi/dot_agents/skills/interactive-learning/**/node_modules/
+chezmoi/dot_agents/skills/interactive-learning/**/.venv/
+chezmoi/dot_agents/skills/interactive-learning/**/dist/
+chezmoi/dot_agents/skills/interactive-learning/**/__pycache__/
+chezmoi/dot_agents/skills/interactive-learning/**/*.tsbuildinfo
