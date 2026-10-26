@@ -1,0 +1,9 @@
+# Installed by run.sh from the lockfiles, never committed or copied.
+.venv/
+node_modules/
+
+# Build and interpreter output.
+dist/
+__pycache__/
+*.pyc
+*.tsbuildinfo

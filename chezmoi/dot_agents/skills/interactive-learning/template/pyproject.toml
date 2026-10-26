@@ -1,0 +1,17 @@
+[project]
+name = "interactive-learning-template"
+version = "0.1.0"
+description = "Local educational template with a React frontend and a FastAPI backend."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+science = ["numpy", "scipy", "polars"]
+research = ["httpx", "pypdf"]
+plotting = ["matplotlib"]
+
+[tool.uv]
+package = false

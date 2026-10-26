@@ -1,0 +1,116 @@
+@import "@fontsource-variable/outfit";
+@import "katex/dist/katex.min.css";
+@import "tailwindcss";
+
+/* Warm neutral themes. Chrome uses role tokens only, plotted series use the --series-* tokens. */
+:root {
+  color-scheme: light;
+  background: var(--paper);
+  color: var(--ink);
+  --shadow-color: oklch(35% 0.01 85);
+
+  /* Text, warm charcoal down to faint grey */
+  --ink: oklch(30% 0.012 85);
+  --ink-muted: oklch(46% 0.012 85);
+  --ink-subtle: oklch(58% 0.010 85);
+  --ink-faint: oklch(72% 0.008 85);
+
+  /* Surfaces, page < card < floating */
+  --paper: oklch(95% 0.020 85);
+  --surface: oklch(97.5% 0.012 85);
+  --surface-elevated: oklch(99% 0.006 85);
+
+  --danger: oklch(52% 0.22 25);
+
+  /* Plotted series, fixed hues with at least 3:1 contrast on the surface. Blue, orange and teal stay distinguishable under common color vision deficiencies. */
+  --series-potential: oklch(50% 0.17 255);
+  --series-rotation: oklch(56% 0.17 50);
+  --series-total: oklch(50% 0.11 185);
+
+  /* Derived */
+  --divider: color-mix(in oklab, var(--ink) 24%, transparent);
+  --divider-soft: color-mix(in oklab, var(--ink) 10%, transparent);
+  --hover: color-mix(in oklab, var(--ink) 6%, transparent);
+  --hover-strong: color-mix(in oklab, var(--ink) 10%, transparent);
+  --danger-soft: color-mix(in oklab, var(--danger) 12%, transparent);
+
+  --shadow-sm: 0 1px 2px color-mix(in oklab, var(--shadow-color) 6%, transparent),
+    0 2px 8px color-mix(in oklab, var(--shadow-color) 5%, transparent);
+  --inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.5);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --shadow-color: oklch(8% 0.006 85);
+  --ink: oklch(92% 0.012 85);
+  --ink-muted: oklch(75% 0.012 85);
+  --ink-subtle: oklch(64% 0.010 85);
+  --ink-faint: oklch(55% 0.008 85);
+  --paper: oklch(19% 0.008 85);
+  --surface: oklch(23.5% 0.008 85);
+  --surface-elevated: oklch(29% 0.008 85);
+  --danger: oklch(75% 0.15 25);
+  --series-potential: oklch(72% 0.13 250);
+  --series-rotation: oklch(76% 0.15 60);
+  --series-total: oklch(76% 0.11 185);
+  --shadow-sm: 0 1px 2px color-mix(in oklab, var(--shadow-color) 24%, transparent),
+    0 2px 8px color-mix(in oklab, var(--shadow-color) 18%, transparent);
+  --inner-highlight: inset 0 1px 0 0 color-mix(in oklab, var(--ink) 7%, transparent);
+}
+
+/* Wipe Tailwind's default palette so only role tokens compile */
+@theme {
+  --color-*: initial;
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-ink-faint: var(--ink-faint);
+  --color-divider: var(--divider);
+  --color-divider-soft: var(--divider-soft);
+  --color-hover: var(--hover);
+  --color-hover-strong: var(--hover-strong);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-series-potential: var(--series-potential);
+  --color-series-rotation: var(--series-rotation);
+  --color-series-total: var(--series-total);
+  --font-sans: "Outfit Variable", system-ui, -apple-system, sans-serif;
+}
+
+body { margin: 0; }
+html { scroll-padding-top: 4.5rem; }
+@media (min-width: 48rem) { html { scroll-padding-top: 1.5rem; } }
+
+/* Neutral grey text selection, derived from ink so it fits both themes */
+::selection { background: color-mix(in oklab, var(--ink) 22%, transparent); color: inherit; }
+
+/* Keep long equations scrollable without shrinking fractions or widening the page. */
+.math-display { min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.math-display .katex-display { width: max-content; min-width: 100%; margin: 0; }
+.math-display .katex, .math-inline .katex { font-size: 1.1em; }
+
+/* One visible focus style for every interactive element, utilities can still override it */
+@layer base {
+  :where(a, button, summary, input, [tabindex]):focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+}
+
+/* Native range input over a drawn track, the fill is a separate element */
+.slider { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; appearance: none; background: none; cursor: pointer; }
+.slider::-webkit-slider-runnable-track { height: 100%; background: none; }
+.slider::-moz-range-track { background: none; }
+.slider::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; border-radius: 9999px; background: var(--surface-elevated); border: 1px solid var(--divider); box-shadow: var(--shadow-sm); cursor: grab; transition: transform 0.15s; }
+.slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 9999px; background: var(--surface-elevated); border: 1px solid var(--divider); box-shadow: var(--shadow-sm); cursor: grab; }
+.slider:active::-webkit-slider-thumb { transform: scale(1.1); }
+.slider:focus-visible { outline: none; }
+.slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+.slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
