@@ -18,6 +18,8 @@
       - git
       - tmux
       - htop
+      - ncdu
+      - nvtop
       - curl
       - wget
       - kitty
