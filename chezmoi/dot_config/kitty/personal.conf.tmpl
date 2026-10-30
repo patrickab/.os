@@ -17,6 +17,10 @@ clipboard_control write-clipboard write-primary read-clipboard
 map ctrl+tab next_window
 map kitty_mod+tab previous_window
 
+# Plain click opens links even when a program grabs the mouse (tmux, nvim).
+# Press/release still reach the program, so pane focus and scrolling keep working.
+mouse_map left click grabbed mouse_handle_click link
+
 # Tab bar styling
 tab_bar_style fade
 
