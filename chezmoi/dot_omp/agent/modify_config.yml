@@ -1,0 +1,9 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* omp owns ~/.omp/agent/config.yml and rewrites it on every settings change, so only pin the keys below and keep everything else. */ -}}
+{{- $config := dict -}}
+{{- if .chezmoi.stdin -}}
+{{-   $config = fromYaml .chezmoi.stdin -}}
+{{- end -}}
+{{- /* Subagents run on a 1M window, so the reserve-based default compacts near 850k: cap long subagent runs instead. */ -}}
+{{- $config = setValueAtPath "task.agentCompactionThresholdOverrides" (dict "coder" 400000 "task" 400000 "reviewer" 400000) $config -}}
+{{- toYaml $config -}}
