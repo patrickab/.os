@@ -31,14 +31,6 @@ The problem that the user is facing, from the user's perspective.
 
 The solution to the problem, from the user's perspective.
 
-## User Stories
-
-A LONG, numbered list of user stories. Each user story should be in the format of:
-
-1. As an <actor>, I want a <feature>, so that <benefit>
-
-This list of user stories should be extremely extensive and cover all aspects of the feature.
-
 ## Implementation Decisions
 
 A list of implementation decisions that were made. This can include:

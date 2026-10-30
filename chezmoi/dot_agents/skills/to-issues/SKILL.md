@@ -22,7 +22,7 @@ Do NOT interview the user — synthesize what you already know from the conversa
    - **Testable**: Includes clear acceptance criteria that can be verified independently.
    - **Scopo-contained**: Touches a bounded set of modules — no issue should require touching the entire codebase.
 
-4. Group user stories from the PRD into issue-sized clusters. Each cluster becomes one issue. Prefer fewer, well-scoped issues over many micro-issues. Aim for 3–7 issues per PRD.
+4. Group the PRD's Implementation Decisions into issue-sized clusters. Each cluster becomes one issue. Prefer fewer, well-scoped issues over many micro-issues. Aim for 3–7 issues per PRD.
 
 5. Determine dependency ordering. If issue B requires code from issue A to function, mark B with `Depends on: #A`. Issues with no dependencies can be worked on in parallel by separate agents.
 
