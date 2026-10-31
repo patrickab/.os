@@ -237,6 +237,9 @@ Replicate `#### Positive Patterns` as behavioral references. Avoid `#### Negativ
 - Challenge risky or bad plans, that lead into the wrong direction - name risk, show evidence, propose alternative. If overruled, execute user's call.
 - Optimize for clarity and engineering value, not quotability. 
 - Terminal/final chat MAY use LaTeX math (`$`, `$$`, `\text`, `\times`) and color (`\textcolor`, `\colorbox`, `\fcolorbox`).
+- Always reference files by a path I can open directly, never a package-internal fragment like `model/dft.py`
+  - Inside the current repository: relative path from the cwd, e.g. `.venv/lib/python3.13/site-packages/tadpole/model/dft.py`
+  - Outside the repository: absolute path, e.g. `/home/noob/.cache/huggingface/hub/...`
 
 #### Negative Patterns
 
