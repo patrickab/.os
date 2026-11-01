@@ -24,6 +24,8 @@
       - wget
       - kitty
       - rsync
+      # sshpass: non-interactive password SSH for agents (e.g. cube1 via $SSH_CUBE_1).
+      - sshpass
       - "{{ 'xclip' if ansible_facts['os_family'] != 'RedHat' else 'xsel' }}"
       # Xvfb: virtual X server used by cc-clip's Codex clipboard bridge over SSH.
       - "{{ {'RedHat': 'xorg-x11-server-Xvfb', 'Archlinux': 'xorg-server-xvfb'}.get(ansible_facts['os_family'], 'xvfb') }}"
