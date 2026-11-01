@@ -221,3 +221,26 @@
       - com.rafaelmardojai.Blanket
     state: present
   become: no
+
+# Zen blocks public sites (gigachad-bot on Vercel) from calling Tailnet addresses (Local Network Access)
+- name: Find Zen profiles (native and Flatpak, new and legacy layout)
+  ansible.builtin.find:
+    paths:
+      - "{{ ansible_facts['env']['HOME'] }}/.config/zen"
+      - "{{ ansible_facts['env']['HOME'] }}/.zen"
+      - "{{ ansible_facts['env']['HOME'] }}/.var/app/app.zen_browser.zen/config/zen"
+      - "{{ ansible_facts['env']['HOME'] }}/.var/app/app.zen_browser.zen/.zen"
+    file_type: directory
+    patterns: '*.*'
+  register: zen_profiles
+
+- name: Disable Zen Local Network Access blocking
+  ansible.builtin.lineinfile:
+    path: "{{ item.path }}/user.js"
+    regexp: 'network\.lna\.enabled'
+    line: 'user_pref("network.lna.enabled", false);'
+    create: yes
+    mode: '0644'
+  loop: "{{ zen_profiles.files }}"
+  loop_control:
+    label: "{{ item.path }}"
