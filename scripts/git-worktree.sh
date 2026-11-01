@@ -17,17 +17,27 @@ fi
 shopt -s nullglob dotglob
 repos=()
 entries=()
+
+# Adds every worktree below directory $2 of repo $1. A branch with slashes (refactor/314-x) nests its worktree a level
+# deeper, so descend until a `.git` marks a worktree, never into one.
+collect_worktrees() {
+    local repo_name="$1" dir="$2" depth="$3" sub path
+    for sub in "$dir"*/; do
+        path="${sub%/}"
+        if [[ -e "$sub.git" ]]; then
+            entries+=("$repo_name"$'\t'"${path#"$root/$repo_name/"}"$'\t'"$path")
+        elif (( depth < 3 )); then
+            collect_worktrees "$repo_name" "$sub" $((depth + 1))
+        fi
+    done
+}
+
 for repo in "$root"/*/; do
     repo_name="${repo%/}"
     repo_name="${repo_name##*/}"
-    found=false
-    for worktree in "$repo"*/; do
-        [[ -f "$worktree.git" || -d "$worktree.git" ]] || continue
-        path="${worktree%/}"
-        entries+=("$repo_name"$'\t'"${path##*/}"$'\t'"$path")
-        found=true
-    done
-    if [[ "$found" == true ]]; then
+    count=${#entries[@]}
+    collect_worktrees "$repo_name" "$repo" 1
+    if (( ${#entries[@]} > count )); then
         repos+=("$repo_name")
     fi
 done
