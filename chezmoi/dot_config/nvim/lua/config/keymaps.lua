@@ -15,6 +15,10 @@ vim.keymap.set("n", "<C-Left>", ":vertical resize +2<CR>", { silent = true })
 vim.keymap.set("n", "<A-Down>", ":m .+1<CR>==", { desc = "Move line down" })
 vim.keymap.set("n", "<A-Up>", ":m .-2<CR>==", { desc = "Move line up" })
 
+-- Swap vertical motions: j moves up, k moves down
+vim.keymap.set({ "n", "x", "o" }, "j", "k", { noremap = true, desc = "Move up (swapped)" })
+vim.keymap.set({ "n", "x", "o" }, "k", "j", { noremap = true, desc = "Move down (swapped)" })
+
 vim.keymap.set("o", "f", function()
   if vim.v.operator == "y" then
     vim.fn.setreg("+", vim.fn.expand("%:p"))
