@@ -37,6 +37,18 @@
     state: latest
   become: yes
 
+# LaTeX toolchain for gigachad-bot's LaTeX tab (latexmk builds the PDF), German for babel's ngerman
+- name: Install LaTeX toolchain
+  package:
+    name: "{{ latex_packages[ansible_facts['os_family']] }}"
+    state: present
+  vars:
+    latex_packages:
+      Archlinux: [texlive-basic, texlive-latex, texlive-latexrecommended, texlive-latexextra, texlive-fontsrecommended, texlive-binextra, texlive-bibtexextra, texlive-langgerman, biber]
+      Debian: [texlive-latex-recommended, texlive-latex-extra, texlive-fonts-recommended, texlive-bibtex-extra, texlive-lang-german, latexmk, biber]
+      RedHat: [texlive-scheme-medium, texlive-collection-langgerman, latexmk, biber]
+  become: yes
+
 # Mise Setup
 # Distro-agnostic version manager used for AI CLI tools (pi, oh-my-pi) that
 # aren't reliably packaged in Homebrew. Installed via the official installer
