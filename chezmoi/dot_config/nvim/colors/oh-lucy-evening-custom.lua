@@ -6,7 +6,13 @@
 -- re-apply it. (Splitting this across require()d modules is what previously
 -- made every re-apply a silent no-op: require returns the cached module.)
 --
--- Layout: options -> palette -> highlight table -> apply.
+-- Layout: options -> palettes -> highlight table -> apply.
+--
+-- Palettes: 'background' picks `dark` or `light`. Neovim sets it from the
+-- terminal (OSC 11 query) unless it is set explicitly, <leader>ub flips it, and
+-- either way Neovim re-sources this file. Both palettes are in one place below,
+-- the light surfaces are a faint cream (app-paper hue, a notch dimmer) so the
+-- editor stays easy on the eyes.
 --
 -- Options, all settable as globals before the scheme loads:
 --   g:oh_lucy_evening_transparent_background   (default 0)
@@ -23,11 +29,12 @@ if vim.fn.exists 'syntax_on' == 1 then
 end
 
 vim.o.termguicolors = true
--- 'background' is deliberately NOT set here. Writing it from inside a
+-- 'background' is deliberately only READ here. Writing it from inside a
 -- colorscheme re-enters Neovim's did_set_background handler, which resets the
--- default highlight groups and re-sources g:colors_name -- so the assignment
--- below on the last line gets clobbered and the scheme is left half-applied
--- with nvim's own (light) defaults. It is pinned in lua/config/options.lua.
+-- default highlight groups and re-sources g:colors_name -- the assignment
+-- would be clobbered and the scheme left half-applied. Do not pin it in
+-- lua/config/options.lua either: a script-set 'background' disables Neovim's
+-- OSC 11 auto-detection of the terminal.
 
 -----------------------------------------
 --        Options
@@ -68,43 +75,36 @@ end
 --        Palette
 -----------------------------------------
 
--- surfaces per 'background' (<leader>ub)
-local surface = vim.o.background == 'light' and {
-  bg     = '#1E1D23',
-  dark   = '#1A191E',
-  raised = '#29292E',
-  split  = '#2E2930',
-} or {
-  bg     = '#121116',
-  dark   = '#0E0D12',
-  raised = '#1C1B21',
-  split  = '#211F26',
-}
+-- Names are roles, not literal colors: `white*` is the main text and `black*`
+-- the raised surfaces (popups, cursor line), so both invert in `light`.
+-- Every key exists in both palettes.
+local palettes = {}
 
-local colors = {
+palettes.dark = {
   fg               = "#DED7D0",
-  bg               = surface.bg,
-  none             = surface.bg,
-  dark             = surface.dark,
+  bg               = '#121116',
+  none             = '#121116',
+  dark             = '#0E0D12',
   comment          = "#686069",
   popup_back       = '#515761',
-  cursor_fg        = '#DED7D0',
+  cursor_fg        = '#121116',
   context          = '#515761',
-  cursor_bg        = '#AEAFAD',
+  cursor_bg        = '#EFD472',
+  cursor_line      = '#24211E', -- terminal bg (gigachad-bot page, oklch 19% 0.008 70) +1 level
   accent           = '#BBBBBB',
   diff_add         = '#8CD881',
   diff_change      = '#6CAEC0',
   cl_bg            = "#524A51",
   diff_text        = '#568BB4',
   line_fg          = "#524A51",
-  line_bg          = surface.bg,
-  gutter_bg        = surface.bg,
+  line_bg          = '#121116',
+  gutter_bg        = '#121116',
   non_text         = "#7F737D",
   selection_bg     = "#817081",
   selection_fg     = "#615262",
   vsplit_fg        = "#cccccc",
-  vsplit_bg        = surface.split,
-  visual_select_bg = surface.raised,
+  vsplit_bg        = '#211F26',
+  visual_select_bg = '#36322E', -- same warm hue, +2 levels
 
   red_key_w  = "#FF7DA3",
   red_err    = "#D95555",
@@ -112,8 +112,8 @@ local colors = {
   green      = "#7EC49D",
   blue_type  = '#8BB8D0',
   cyan       = '#A1CCCE',
-  black1     = surface.raised,
-  black      = surface.dark,
+  black1     = '#1C1B21',
+  black      = '#0E0D12',
   white1     = "#DED7D0",
   white      = "#DED7D0",
   variable   = "#8C8380",
@@ -127,7 +127,68 @@ local colors = {
   pink       = "#BDA9D4",
   yellow     = "#EFD472",
 
+  -- :terminal ANSI colors that must stay readable on this background
+  ansi_black        = '#0E0D12',
+  ansi_white        = "#DED7D0",
+  ansi_bright_white = "#DED7D0",
 }
+
+palettes.light = {
+  fg               = "#2A2520",
+  bg               = '#F0E9DB', -- faint cream, the one color to tune the light editor background
+  none             = '#F0E9DB',
+  dark             = '#EAE2D3',
+  comment          = "#8C827B", -- neutrals match dark-mode contrast: text > punctuation > variable > comment
+  popup_back       = '#C9BFAC',
+  cursor_fg        = '#2B2620',
+  context          = '#C9BFAC',
+  cursor_bg        = '#D9962B',
+  cursor_line      = '#EAE3D4',
+  accent           = '#7A7068',
+  diff_add         = '#3F8A3B',
+  diff_change      = '#2F7F9A',
+  cl_bg            = "#D8CFBA",
+  diff_text        = '#2F6F95',
+  line_fg          = "#A1968A",
+  line_bg          = '#F0E9DB',
+  gutter_bg        = '#F0E9DB',
+  non_text         = "#A39889",
+  selection_bg     = "#D3C8B0",
+  selection_fg     = "#DBD0B8",
+  vsplit_fg        = "#CFC5B2",
+  vsplit_bg        = '#DFD7C6',
+  visual_select_bg = '#DED7C9', -- gigachad-bot ::selection tint at 12%, one step past cursor_line
+
+  -- Syntax inks: dark-palette hues at OKLCH L~0.53, chroma pushed to the sRGB
+  -- limit so they pop on cream. Yellow shifts to amber, a true yellow is
+  -- unreadable on light.
+  red_key_w  = "#C61365",
+  red_err    = "#C51D24",
+  green_func = '#00814F',
+  green      = "#00814F",
+  blue_type  = '#0573AA',
+  cyan       = '#017E88',
+  black1     = '#E5DDCD',
+  black      = '#EAE2D3',
+  white1     = "#2A2520",
+  white      = "#2A2520",
+  variable   = "#696059",
+  gray_punc  = "#645B54",
+  gray2      = "#8F8478",
+  gray1      = '#D6CCB6',
+  gray       = "#E2D9C4",
+  orange     = "#C43351",
+  boolean    = "#8635CC",
+  orange_wr  = "#BB4F04",
+  pink       = "#805AB8",
+  yellow     = "#A56D03",
+
+  ansi_black        = '#34302B',
+  ansi_white        = "#8F8579",
+  ansi_bright_white = "#52493F",
+}
+
+local colors = palettes[vim.o.background == 'light' and 'light' or 'dark']
 
 -----------------------------------------
 --        Highlight groups
@@ -153,10 +214,10 @@ theme.base = {
     Conceal      = { fg = colors.fg }, -- {bg = bg_or_none(colors.bg) },
     Conditional  = { fg = colors.red_key_w },
     Constant     = { fg = colors.pink },
-    Cursor       = { fg = colors.yellow, bg = colors.bg },
+    Cursor       = { fg = colors.cursor_fg, bg = colors.cursor_bg },
     CursorColumn = { fg = "NONE", bg = "NONE" },
     -- CursorIM = { fg = colors.cursor_fg, bg = colors.cursor_bg },
-    CursorLine   = { bg = colors.black1 },
+    CursorLine   = { bg = colors.cursor_line },
     CursorLineNr = { fg = colors.white, bg = bg_or_none(colors.gutter_bg), style = 'bold' },
 
     Debug       = { fg = colors.fg },
@@ -610,14 +671,14 @@ theme.plugins = {
 -- :terminal, lazygit, and any embedded shell read these; util.load maps the
 -- list onto vim.g.terminal_color_0 .. _15.
 theme.terminal = {
-  colors.black,      -- 0  black
+  colors.ansi_black, -- 0  black
   colors.red_err,    -- 1  red
   colors.green_func, -- 2  green
   colors.yellow,     -- 3  yellow
   colors.blue_type,  -- 4  blue
   colors.boolean,    -- 5  magenta
   colors.diff_change,-- 6  cyan
-  colors.white1,     -- 7  white
+  colors.ansi_white, -- 7  white
   colors.line_fg,    -- 8  bright black
   colors.red_key_w,  -- 9  bright red
   colors.diff_add,   -- 10 bright green
@@ -625,7 +686,7 @@ theme.terminal = {
   colors.diff_text,  -- 12 bright blue
   colors.pink,       -- 13 bright magenta
   colors.accent,     -- 14 bright cyan
-  colors.fg,         -- 15 bright white
+  colors.ansi_bright_white, -- 15 bright white
 }
 
 -----------------------------------------

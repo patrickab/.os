@@ -14,8 +14,5 @@ if vim.env.SSH_CONNECTION or vim.env.SSH_TTY or vim.env.SSH_CLIENT then
   vim.g.clipboard = vim.env.TMUX and "tmux" or "osc52"
 end
 
--- Pinned outside the colorscheme on purpose: setting 'background' from inside
--- colors/*.lua re-enters did_set_background and wipes the scheme. Setting it
--- here also gives it a real script sid, which makes Neovim drop its OSC-11
--- background auto-detection autocmd at VimEnter.
-vim.o.background = "dark"
+-- 'background' is left unset on purpose: Neovim detects it from the terminal (OSC 11) and the
+-- colorscheme follows, <leader>ub flips it. Setting it here would disable that detection.
