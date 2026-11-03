@@ -39,16 +39,16 @@
     state: latest
   become: yes
 
-# LaTeX toolchain for gigachad-bot's LaTeX tab (latexmk builds the PDF), German for babel's ngerman
+# LaTeX toolchain for gigachad-bot's LaTeX tab (latexmk builds the PDF), German for babel's ngerman, extra fonts for fontawesome5
 - name: Install LaTeX toolchain
   package:
     name: "{{ latex_packages[ansible_facts['os_family']] }}"
     state: present
   vars:
     latex_packages:
-      Archlinux: [texlive-basic, texlive-latex, texlive-latexrecommended, texlive-latexextra, texlive-fontsrecommended, texlive-binextra, texlive-bibtexextra, texlive-langgerman, biber]
-      Debian: [texlive-latex-recommended, texlive-latex-extra, texlive-fonts-recommended, texlive-bibtex-extra, texlive-lang-german, latexmk, biber]
-      RedHat: [texlive-scheme-medium, texlive-collection-langgerman, latexmk, biber]
+      Archlinux: [texlive-basic, texlive-latex, texlive-latexrecommended, texlive-latexextra, texlive-fontsrecommended, texlive-fontsextra, texlive-binextra, texlive-bibtexextra, texlive-langgerman, biber]
+      Debian: [texlive-latex-recommended, texlive-latex-extra, texlive-fonts-recommended, texlive-fonts-extra, texlive-bibtex-extra, texlive-lang-german, latexmk, biber]
+      RedHat: [texlive-scheme-medium, texlive-collection-fontsextra, texlive-collection-langgerman, latexmk, biber]
   become: yes
 
 # Mise Setup
