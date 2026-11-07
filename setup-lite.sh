@@ -4,7 +4,8 @@ set -e
 cd ~/.os
 
 echo "==> Pulling latest config..."
-git pull origin main 2>/dev/null || echo "(no git remote yet, skipping pull)"
+# Fail instead of applying a stale repo over newer local files.
+git fetch --quiet && git merge --ff-only --quiet '@{u}' || { echo "!! Could not fast-forward ~/.os, resolve and re-run" >&2; exit 1; }
 
 if ! command -v chezmoi &>/dev/null; then
   echo "==> Installing chezmoi..."
