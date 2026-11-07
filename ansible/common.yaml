@@ -54,7 +54,8 @@
 # Mise Setup
 # Distro-agnostic version manager used for AI CLI tools (pi, oh-my-pi) that
 # aren't reliably packaged in Homebrew. Installed via the official installer
-# script so it doesn't depend on Homebrew being present.
+# script so it doesn't depend on Homebrew being present. Omarchy declares these
+# tools itself (omarchy-settings), so skip them there to avoid duplicate installs.
 
 - name: Check if mise is installed
   stat:
@@ -67,6 +68,11 @@
     creates: "{{ ansible_facts['env']['HOME'] }}/.local/bin/mise"
   become: no
   when: not mise_binary.stat.exists
+
+- name: Check for Omarchy-managed mise tools
+  stat:
+    path: /etc/mise/conf.d/omarchy-tools.toml
+  register: omarchy_mise_tools
 
 # Homebrew Setup & Packages
 # Prevent static binary rot via Homebrew. Ensure distro-agnostic user-space installation and automatic updates.
@@ -153,6 +159,7 @@
   environment:
     PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
   become: no
+  when: not omarchy_mise_tools.stat.exists
 
 - name: Install oh-my-pi via mise (distro-agnostic GitHub release binary)
   ansible.builtin.command:
@@ -160,6 +167,7 @@
   environment:
     PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
   become: no
+  when: not omarchy_mise_tools.stat.exists
 
 - name: Install rulesync (agentsync) via uv for cross-agent config sync
   ansible.builtin.command:
