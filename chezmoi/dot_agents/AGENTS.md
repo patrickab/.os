@@ -315,4 +315,5 @@ Run any process that may outlive one tool call or requires live/post-exit inspec
 * `agent-proc stop <name>` for servers and watchers once no longer needed. Sends C-c, 3s grace, closes the window.
 * `agent-proc ls` lists agent windows with running/exit status.
 * NEVER use raw tmux for agent processes. NEVER infer process state from logs or artifacts.
+* Waiting for a long-running job to finish (local or remote): watch it with a background loop that checks completion every 15 s, e.g. `until <done-check>; do sleep 15; done`. Never use poll intervals of minutes, they delay the follow-up work by up to the full interval.
 
