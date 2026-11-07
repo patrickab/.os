@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 
 const STATE_DIR = `${Bun.env.PI_CODING_AGENT_DIR ?? `${Bun.env.HOME}/.omp/agent`}/extensions/files`;
 const STATE_FILE = `${STATE_DIR}/${process.pid}.jsonl`;
+/** omp-web has no terminal to hand over: gigachad-bot's omp-web overlay opens this notice's path in its file panel. */
+const OPEN_FILE_NOTICE_PREFIX = "Open file: ";
 
 type Change = { path: string; sessionFile: string };
 
@@ -94,6 +96,10 @@ export default function filesExtension(pi: ExtensionAPI): void {
 			const selected = await ctx.ui.select("Files changed by this session", choices);
 			const path = selected ? choices.find(choice => choice.label === selected)?.path : undefined;
 			if (!path) return;
+			if (ctx.mode === "rpc") {
+				ctx.ui.notify(`${OPEN_FILE_NOTICE_PREFIX}${path}`, "info");
+				return;
+			}
 
 			const editor = (Bun.env.VISUAL || Bun.env.EDITOR || "nvim").split(/\s+/);
 			// Same hand-over as omp's built-in Ctrl+G: stop the TUI, give the editor the terminal, resume.

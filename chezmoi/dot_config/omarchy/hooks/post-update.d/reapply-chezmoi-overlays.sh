@@ -13,8 +13,9 @@ set -euo pipefail
 
 # 1. Deploy chezmoi-managed files (hypr/*.lua, kitty/personal.conf, etc).
 #    Omarchy 4.0+ uses Lua for Hyprland config, which it only overwrites when
-#    a file is still stock -- so bindings.lua/input.lua/monitors.lua/
-#    looknfeel.lua/hyprland.lua are safe to track directly, no overlay dance.
+#    a file is still stock -- so bindings.lua/input.lua/looknfeel.lua/
+#    hyprland.lua are safe to track directly, no overlay dance. monitors.lua
+#    is per machine and stays out of chezmoi (see .chezmoiignore).
 chezmoi apply --source "$HOME/.os/chezmoi" || true
 
 # 2. kitty.conf — ensure our personal include is present (idempotent).

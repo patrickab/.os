@@ -14,5 +14,9 @@
 .agents/skills/interactive-learning/**/*.tsbuildinfo
 
 # Keep machine-local monitor layouts and HyprMon preferences out of deployment.
+.config/hypr/monitors.lua
 .config/hypr/hyprmon.lua
 .config/hyprmon/**
+
+# Omarchy's shell settings UI rewrites the bar layout, so it stays machine-local.
+.config/omarchy/shell.json
