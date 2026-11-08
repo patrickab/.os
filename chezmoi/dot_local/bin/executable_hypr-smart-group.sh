@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SUPER+SHIFT+arrow: unify group join/eject on one key (Pop!_OS style).
+# SUPER+ALT+arrow: unify group join/eject on one key (Pop!_OS style).
 # If the active window is grouped, eject it in the pressed direction.
 # Otherwise, merge it into whatever's in that direction.
 #
@@ -63,7 +63,5 @@ if [ "$grouped_count" -gt 1 ]; then
     hyprctl dispatch "hl.dsp.window.swap({direction = \"$dir\"})"
   fi
 else
-  # The groupbar decoration is created only when the group forms.
-  hypr-groupbar-flash.sh
   hyprctl dispatch "hl.dsp.window.move({into_group = \"$dir\"})"
 fi
