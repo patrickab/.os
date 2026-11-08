@@ -52,10 +52,9 @@
   become: yes
 
 # Mise Setup
-# Distro-agnostic version manager used for AI CLI tools (pi, oh-my-pi) that
-# aren't reliably packaged in Homebrew. Installed via the official installer
-# script so it doesn't depend on Homebrew being present. Omarchy declares these
-# tools itself (omarchy-settings), so skip them there to avoid duplicate installs.
+# Distro-agnostic version manager for AI CLI tools (pi, oh-my-pi). Installed via
+# the official installer so it doesn't depend on Homebrew. The tools themselves
+# are declared in chezmoi (dot_config/mise/conf.d/agents.toml), mirroring Omarchy.
 
 - name: Check if mise is installed
   stat:
@@ -68,11 +67,6 @@
     creates: "{{ ansible_facts['env']['HOME'] }}/.local/bin/mise"
   become: no
   when: not mise_binary.stat.exists
-
-- name: Check for Omarchy-managed mise tools
-  stat:
-    path: /etc/mise/conf.d/omarchy-tools.toml
-  register: omarchy_mise_tools
 
 # Homebrew Setup & Packages
 # Prevent static binary rot via Homebrew. Ensure distro-agnostic user-space installation and automatic updates.
@@ -153,36 +147,12 @@
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
 
-- name: Install pi CLI via mise (distro-agnostic GitHub release binary)
-  ansible.builtin.command:
-    cmd: mise use --global pi@latest
-  environment:
-    PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
-  become: no
-  when: not omarchy_mise_tools.stat.exists
-
-- name: Install oh-my-pi via mise (distro-agnostic GitHub release binary)
-  ansible.builtin.command:
-    cmd: mise use --global "github:can1357/oh-my-pi@latest"
-  environment:
-    PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
-  become: no
-  when: not omarchy_mise_tools.stat.exists
-
 - name: Install rulesync (agentsync) via uv for cross-agent config sync
   ansible.builtin.command:
     cmd: uv tool install rulesync
     creates: "{{ ansible_facts['env']['HOME'] }}/.local/bin/rulesync"
   environment:
     PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
-  become: no
-
-- name: Install Pi packages
-  ansible.builtin.command:
-    cmd: pi install npm:pi-compact-transcript
-  environment:
-    PATH: "{{ ansible_facts['env']['HOME'] }}/.local/bin:{{ ansible_facts['env']['HOME'] }}/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/bin:{{ ansible_facts['env']['PATH'] }}"
-  ignore_errors: yes
   become: no
 
 - name: Install Docker via Homebrew (non-Debian/RedHat; Debian/Fedora use geerlingguy.docker role)

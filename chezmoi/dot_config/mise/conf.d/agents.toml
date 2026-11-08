@@ -1,0 +1,5 @@
+# Same declarations as Omarchy's /etc/mise/conf.d/omarchy-tools.toml: identical
+# tool names reuse Omarchy's install there, and give other distros the same auto-update.
+[tools]
+oh-my-pi = { version = "latest", lazy = true, auto_update = "4h", minimum_release_age = "0s" }
+pi = { version = "latest", lazy = true, auto_update = "4h", minimum_release_age = "0s" }
