@@ -74,7 +74,8 @@ Add a short working-tree caveat when applicable.
 - Use as much space as needed to preserve relevant information. Stay concise without imposing a token target or ceiling.
 - Apply the global documentation standard. Require the module-map ASCII tree and avoid duplicate explanations across files or formats. Link to the owning context doc instead.
 - Preserve agent-relevant contracts: adapter ownership, configuration knobs/defaults, capability flags, access checks, write paths, precedence, error semantics, and recovery caveats.
-- Omit cosmetic UI details, exact placement, colors, spacing, animation, exhaustive symbol inventories, and incidental implementation history.
+- Every sentence must serve development or understanding of the codebase (global documentation standard, "Cut in particular"). Omit cosmetic UI details (sizes, pixels, placement, colors, theme tokens, spacing, animation), exhaustive symbol inventories, implementation history (removed features, one-off migrations, "no longer"/"any more"), generation metadata beyond the provenance header (Repomix version, file or token counts), and copies of rules owned by `AGENTS.md`, runbooks or style guides. Keep compatibility behavior that still runs.
+- Module-map tree lines name what a file owns in one line. Contract detail lives in architecture, not the tree.
 - Link to repository-maintained docs for setup/configuration/recovery commands. Keep generated context separate from runbooks. Discover optional guides through repository instructions rather than hard-coding their filenames here.
 - Remove stale, contradictory, redundant, or irrelevant statements. Restore useful old facts missing from the pack only after checking their current source.
 - Only write `.docs/architecture.md`, `.docs/module-map.md`, and `.docs/system-overview.md` in the repository. Preserve maintained docs. Do not edit source, other docs, configuration, locks, or agent instructions. Do not commit unless explicitly requested.
@@ -82,7 +83,8 @@ Add a short working-tree caveat when applicable.
 ## 6. Check and report
 
 - Validate relative links, referenced source paths, Markdown fences, and provenance headers.
-- Compare existing and regenerated docs for meaningful information loss. Track facts moved between context docs rather than judging each file in isolation. Check every major component against the pack inventory and maintained docs.
+- Compare existing and regenerated docs for meaningful information loss. Track facts moved between context docs rather than judging each file in isolation. Check every major component against the pack inventory and maintained docs. Losing cosmetic detail, history or duplicates is intended, not information loss.
+- Check generated docs against repository `AGENTS.md` and maintained guides: a contradiction means the generated doc is wrong, replace it with a link.
 - Confirm all three context docs are complementary and the module map contains an ASCII tree with responsibilities.
 - Remove this task's temporary artifacts. Do not start application servers or run builds/tests for a documentation-only refresh.
 - Report updated files, scope/exclusions, checks performed, and unresolved gaps. Never claim full coverage if evidence was incomplete.

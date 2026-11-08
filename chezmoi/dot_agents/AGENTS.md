@@ -280,9 +280,18 @@ When several items will likely be referenced later present them together as a bu
 - Require an ASCII file tree in module-map documentation, with concise directory/module contents and responsibilities.
 - Let sentences and prose paragraphs earn their place by clarifying concepts.
 - Preserve ownership, source entry points, data flow, persistence, integration contracts, security boundaries, configuration, and important limitations.
-- Omit cosmetic UI details, exact placement, colors, spacing, animation, and incidental implementation history. Explain interactions only when needed for usage or behavior.
+- Docs exist only to serve development and help humans and agents understand the codebase. Test every statement: would a reader change code, find an owner, avoid a bug, or understand a contract or concept without it? If not, cut it.
+- Cut in particular:
+  - Cosmetic UI details: sizes, pixel values, placement, layout grids, colors, theme tokens, spacing, animation, hover styling
+  - Implementation history: what used to be true, one-off migrations or backfills, removed features ("no longer", "any more", "is gone"), commit narratives. Keep compatibility behavior that still runs (e.g. a legacy format that is still read)
+  - Statements of absence nobody would assume, trivia, generation metadata beyond the provenance header (tool versions, file or token counts), instructions addressed to the doc writer
+  - Copies of rules owned elsewhere (`AGENTS.md`, runbooks, style guides): link to the owner instead, a copy goes stale and contradicts it
+  - Key-by-key interaction lists, unless the keys are the contract
+- Explain interactions only when needed for usage or behavior.
 - Keep setup/configuration/recovery commands in repository-maintained guides when present. Link to canonical details and remove stale or contradictory statements.
 - Use as much space as relevant information needs. Impose no token target or ceiling.
+- Index every maintained doc in the repository's `AGENTS.md` with what it covers, when to read it, and when to keep it current, e.g. `` `.docs/deployment.md`: run/setup scripts, redeploy, hosting. Read it only for deploy work. Keep it current when deployment changes ``
+- Every top-level module documents at its top what it does, which contract it consumes and which it provides.
 
 ### Context roles
 
