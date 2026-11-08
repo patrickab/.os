@@ -34,8 +34,9 @@ hl.config({
       border_inactive = "rgba(00000000)",
     },
 
+    -- Flash briefly on group cycle/join.
     groupbar = {
-      enabled = true,
+      enabled = false,
       height = 20,
       gaps_in = 0,
       gaps_out = 0,
@@ -75,6 +76,14 @@ hl.config({
     },
   },
 })
+
+-- Flash the groupbar whenever focus lands on a grouped window, so every way of
+-- cycling a group (default binds, mouse wheel, focus moves) shows the tabs.
+hl.on("window.active", function(window)
+  if window and window.group and window.group.size > 1 then
+    hl.exec_cmd("hypr-groupbar-flash.sh")
+  end
+end)
 
 -- https://wiki.hypr.land/Configuring/Advanced-and-Cool/Animations/
 -- Avoid terminal reflow while toggling the groupbar.

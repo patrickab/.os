@@ -63,5 +63,7 @@ if [ "$grouped_count" -gt 1 ]; then
     hyprctl dispatch "hl.dsp.window.swap({direction = \"$dir\"})"
   fi
 else
+  # The groupbar decoration is created only when the group forms.
+  hypr-groupbar-flash.sh
   hyprctl dispatch "hl.dsp.window.move({into_group = \"$dir\"})"
 fi

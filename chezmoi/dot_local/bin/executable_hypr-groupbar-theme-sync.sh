@@ -26,9 +26,10 @@ dim=$(sed -n 's/^dark_foreground = "#\(......\)"/\1/p' "$COLORS" | head -1)
 [ -n "$dim" ] || dim=$fg
 
 # This config uses Hyprland's Lua backend - `hyprctl keyword` only works
-# with the legacy parser, so use `hyprctl eval` + hl.config() instead.
-# A near-transparent border poke forces Hyprland to rebuild the bar background
-# with the new colors, then the border goes back to fully transparent.
+# with the legacy parser, so use `hyprctl eval` + hl.config() instead (same
+# as hypr-groupbar-flash.sh).
+# Only the colors here; the repaint that makes them take effect is forced by
+# hypr-groupbar-flash.sh, which is the only thing that ever shows the bar.
 hyprctl eval "hl.config({ group = { groupbar = {
   blur = true,
   col = {
@@ -38,9 +39,3 @@ hyprctl eval "hl.config({ group = { groupbar = {
   text_color = \"rgba(${hi}ff)\",
   text_color_inactive = \"rgba(${dim}ff)\",
 } } })" >/dev/null
-for border in 01010100 00000000; do
-  hyprctl eval "hl.config({ group = { col = {
-    border_active = \"rgba($border)\",
-    border_inactive = \"rgba($border)\",
-  } } })" >/dev/null
-done
