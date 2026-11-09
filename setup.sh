@@ -76,6 +76,14 @@ if ! command -v ollama &>/dev/null || ! systemctl is-active --quiet ollama 2>/de
     curl -fsSL https://ollama.com/install.sh | sudo sh
 fi
 
+# WSL: Windows Terminal renders with Windows fonts, and kitty runs via WSLg.
+# Runs after Ansible (installs the Nerd Font + kitty) and chezmoi (personal.conf).
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    echo "==> WSL detected — setting up Windows fonts and kitty launcher..."
+    ~/.os/scripts/setup-wsl-fonts.sh || echo "!! setup-wsl-fonts.sh failed, continuing" >&2
+    ~/.os/scripts/setup-wsl-kitty.sh || echo "!! setup-wsl-kitty.sh failed, continuing" >&2
+fi
+
 if command -v omarchy &> /dev/null; then
     echo "==> Setting wallpaper..."
     omarchy theme bg set ~/.os/assets/wallpaper.png || true
