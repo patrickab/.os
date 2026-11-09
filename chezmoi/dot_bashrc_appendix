@@ -58,6 +58,9 @@ export UV_PROJECT_ENVIRONMENT=".venv"
 [ -f /home/linuxbrew/.linuxbrew/bin/brew ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 export PATH="/home/linuxbrew/.linuxbrew/bin:$HOME/.local/bin:$PATH"
 
+# mise: put its tools (pi, omp) on PATH. Omarchy activates mise itself, so skip if already active.
+[[ -z "${MISE_SHELL:-}" ]] && command -v mise >/dev/null && eval "$(mise activate bash)"
+
 # --- Oh My Posh (Prompt) ---
 # Initialize Oh My Posh if installed
 eval "$(oh-my-posh init bash --config ~/.ohmyposhtheme.omp.json)"
