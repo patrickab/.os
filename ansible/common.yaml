@@ -190,7 +190,7 @@
     name: flathub
     flatpakrepo_url: https://dl.flathub.org/repo/flathub.flatpakrepo
     state: present
-  become: no
+  become: yes
 
 - name: Install flatpak packages
   flatpak:
@@ -200,7 +200,7 @@
       - com.vivaldi.Vivaldi
       - com.rafaelmardojai.Blanket
     state: present
-  become: no
+  become: yes
 
 # Zen blocks public sites (gigachad-bot on Vercel) from calling Tailnet addresses (Local Network Access)
 - name: Find Zen profiles (native and Flatpak, new and legacy layout)
