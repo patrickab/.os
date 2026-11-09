@@ -12,7 +12,14 @@
       - docker-buildx
 
   pre_tasks:
-    - block:
+    - name: Check whether Docker is already installed
+      ansible.builtin.command: sh -c 'command -v docker'
+      register: docker_check
+      changed_when: false
+      failed_when: false
+
+    - when: docker_check.rc != 0
+      block:
         - name: Install Docker from official repo via geerlingguy.docker role
           include_role:
             name: geerlingguy.docker
