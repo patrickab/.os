@@ -40,15 +40,30 @@
         recurse: yes
       become: yes
 
+    - name: Check whether the Ollama service is installed
+      ansible.builtin.command: systemctl cat ollama.service
+      register: ollama_check
+      changed_when: false
+      failed_when: false
+
     - name: Configure Ollama to listen on all interfaces (Docker bridge needs access)
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/ollama.service.d/override.conf
-        content: |
-          [Service]
-          Environment="OLLAMA_HOST=0.0.0.0"
-        mode: '0644'
+      when: ollama_check.rc == 0
       become: yes
-      notify: Reload Ollama
+      block:
+        - name: Create Ollama systemd drop-in directory
+          ansible.builtin.file:
+            path: /etc/systemd/system/ollama.service.d
+            state: directory
+            mode: '0755'
+
+        - name: Write Ollama override.conf
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/ollama.service.d/override.conf
+            content: |
+              [Service]
+              Environment="OLLAMA_HOST=0.0.0.0"
+            mode: '0644'
+          notify: Reload Ollama
 
   tasks:
     - name: Import universal tasks

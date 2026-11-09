@@ -36,15 +36,43 @@
     - name: Import universal tasks
       import_tasks: common.yaml
 
-    - name: Configure Ollama to listen on all interfaces (Docker bridge needs access)
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/ollama.service.d/override.conf
-        content: |
-          [Service]
-          Environment="OLLAMA_HOST=0.0.0.0"
-        mode: '0644'
+    - name: Install zstd (needed by the Ollama installer to unpack its release archive)
+      ansible.builtin.apt:
+        name: zstd
+        state: present
       become: yes
-      notify: Reload Ollama
+
+    - name: Install Ollama via official install script (creates ollama.service)
+      ansible.builtin.shell: set -o pipefail && curl -fsSL https://ollama.com/install.sh | sh
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/ollama
+      become: yes
+
+    - name: Check whether the Ollama service is installed
+      ansible.builtin.command: systemctl cat ollama.service
+      register: ollama_check
+      changed_when: false
+      failed_when: false
+
+    - name: Configure Ollama to listen on all interfaces (Docker bridge needs access)
+      when: ollama_check.rc == 0
+      become: yes
+      block:
+        - name: Create Ollama systemd drop-in directory
+          ansible.builtin.file:
+            path: /etc/systemd/system/ollama.service.d
+            state: directory
+            mode: '0755'
+
+        - name: Write Ollama override.conf
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/ollama.service.d/override.conf
+            content: |
+              [Service]
+              Environment="OLLAMA_HOST=0.0.0.0"
+            mode: '0644'
+          notify: Reload Ollama
 
   handlers:
     - name: Reload Ollama
