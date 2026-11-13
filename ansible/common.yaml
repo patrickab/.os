@@ -145,6 +145,7 @@
       - zoxide
       - gh
       - repomix
+      - ffmpeg
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
@@ -173,6 +174,14 @@
       - font-jetbrains-mono-nerd-font
     state: latest
     install_options: force
+    path: /home/linuxbrew/.linuxbrew/bin
+  become: no
+
+- name: Install Claude Code via Homebrew cask (Linux and macOS)
+  community.general.homebrew_cask:
+    name:
+      - claude-code
+    state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no
 
