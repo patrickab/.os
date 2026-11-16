@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # WSL only: launch WSL straight into kitty (via WSLg) instead of Windows Terminal.
-#   1. Creates ~/.config/kitty/kitty.conf including personal.conf if missing
-#      (on Omarchy, Omarchy's kitty.conf does that include)
+#   1. Writes ~/.config/kitty/kitty.conf: includes personal.conf, then WSLg overrides
+#      (X11 backend, no title bar, no transparency)
 #   2. Adds a "Kitty (WSL)" shortcut to the Start menu and Desktop that runs
 #      wslg.exe -d <distro> --cd ~ -- kitty   (no console window)
 # Usage: setup-wsl-kitty.sh   (then right-click the shortcut > Pin to taskbar)
@@ -34,19 +34,21 @@ if [[ ! -x "$(wslpath -u "$WSLG_EXE")" ]]; then
 fi
 DISTRO="${WSL_DISTRO_NAME:?WSL_DISTRO_NAME not set}"
 
-echo "==> Ensuring kitty loads personal.conf..."
+echo "==> Writing WSL kitty.conf (personal.conf + WSLg overrides)..."
 KITTY_DIR="$HOME/.config/kitty"
 mkdir -p "$KITTY_DIR"
-if [[ ! -f "$KITTY_DIR/kitty.conf" ]]; then
-  printf '# Created by setup-wsl-kitty.sh (Omarchy provides this file elsewhere)\ninclude personal.conf\n' \
-    >"$KITTY_DIR/kitty.conf"
-  green "Created $KITTY_DIR/kitty.conf"
-elif ! grep -q '^include personal.conf' "$KITTY_DIR/kitty.conf"; then
-  printf '\ninclude personal.conf\n' >>"$KITTY_DIR/kitty.conf"
-  green "Added include to $KITTY_DIR/kitty.conf"
-else
-  green "kitty.conf already includes personal.conf"
-fi
+cat >"$KITTY_DIR/kitty.conf" <<'EOF'
+# Managed by ~/.os/scripts/setup-wsl-kitty.sh (WSL only, Omarchy ships its own kitty.conf)
+include personal.conf
+
+# WSLg overrides (later directives win)
+# X11: kitty's Wayland title bar can't be dragged and ignores Win+Arrow under WSLg
+linux_display_server x11
+hide_window_decorations yes
+# WSLg can't blur, so transparency just shows the desktop through the terminal
+background_opacity 1.0
+EOF
+green "Wrote $KITTY_DIR/kitty.conf"
 
 WIN_LOCALAPPDATA="$(cmd.exe /c 'echo %LOCALAPPDATA%' 2>/dev/null | tr -d '\r')"
 WIN_APPDATA="$(cmd.exe /c 'echo %APPDATA%' 2>/dev/null | tr -d '\r')"

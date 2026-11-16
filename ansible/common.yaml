@@ -146,6 +146,8 @@
       - gh
       - repomix
       - ffmpeg
+      - lazygit
+      - glab
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no

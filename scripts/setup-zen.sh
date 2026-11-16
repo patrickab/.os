@@ -3,7 +3,7 @@
 # disable Local Network Access blocking (lets public sites such as
 # gigachad-bot on Vercel call Tailnet addresses).
 #
-# Omarchy: native AUR package via `omarchy`. Elsewhere: Flatpak from Flathub.
+# Omarchy: native AUR package via `omarchy`. WSL: Windows Zen via winget. Elsewhere: Flatpak.
 # Usage: setup-zen.sh
 # Run as normal user; sudo will be prompted as needed.
 
@@ -20,8 +20,20 @@ case "${1:-}" in
 esac
 
 FLATPAK_ID="app.zen_browser.zen"
+WIN_ZEN_DIR=""
 
-if command -v omarchy &>/dev/null; then
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  # WSL: Zen runs on Windows, so install and patch the Windows build
+  if cmd.exe /c winget list --id Zen-Team.Zen-Browser -e --accept-source-agreements >/dev/null 2>&1; then
+    green "Windows Zen already installed."
+  else
+    echo "==> Installing Windows Zen via winget..."
+    cmd.exe /c winget install --id Zen-Team.Zen-Browser -e --silent \
+      --accept-package-agreements --accept-source-agreements | tr -d '\r'
+  fi
+  WIN_ZEN_DIR="$(wslpath -u "$(cmd.exe /c 'echo %APPDATA%' 2>/dev/null | tr -d '\r')")/zen/Profiles"
+  DESKTOP_FILE="Windows Zen (set it as default in Windows Settings > Default apps)"
+elif command -v omarchy &>/dev/null; then
   echo "==> Installing native Zen via omarchy (AUR: zen-browser-bin)..."
   omarchy pkg aur add zen-browser-bin
 
@@ -69,7 +81,8 @@ for base in \
   "$HOME/.config/zen" \
   "$HOME/.zen" \
   "$HOME/.var/app/$FLATPAK_ID/config/zen" \
-  "$HOME/.var/app/$FLATPAK_ID/.zen"; do
+  "$HOME/.var/app/$FLATPAK_ID/.zen" \
+  ${WIN_ZEN_DIR:+"$WIN_ZEN_DIR"}; do
   [[ -d "$base" ]] || continue
   # Profile dirs are named <random>.<name>, e.g. abcd1234.Default (release)
   for profile in "$base"/*.*/; do
