@@ -2,4 +2,7 @@
 # Re-runs whenever this file changes: add or remove packages here.
 set -euo pipefail
 
-"$HOME/.local/bin/mise" exec -- pi install npm:pi-compact-transcript
+mise=("$HOME/.local/bin/mise" exec --)
+"${mise[@]}" pi install npm:pi-compact-transcript
+"${mise[@]}" pi install npm:pi-subagents
+"${mise[@]}" pi install npm:pi-intercom
