@@ -330,3 +330,9 @@ Run any process that may outlive one tool call or requires live/post-exit inspec
 
 - Implementing a plan, issues or slices with parallel subagents: follow the `parallelize-plan` skill.
 - Message other sessions only when they work on the same or a related codebase.
+- Parallel coding agents work in isolated checkouts (omp `isolated: true`, Pi: one git worktree per agent), never in the shared checkout.
+- In a worktree, reuse the primary checkout's tooling instead of installing it again:
+  - Python: run `agent-venv` once. It prints the worktree's `.venv/bin/python`, an overlay that sees every package of the primary venv. Run tools through it (`.venv/bin/python -m pytest`). Packages the task needs on top: `uv pip install --python .venv/bin/python <pkg>`, they stay in the overlay. Never `uv sync`, `uv run` or `uv lock` in a worktree
+  - JS: `node_modules` comes with the checkout (omp's clone copies it copy-on-write), else `cp -a --reflink=always "$PRIMARY/<dir>/node_modules" <dir>/` with `PRIMARY=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")`. Never `npm install` in a worktree
+- Dependency changes go into the report (package, version, why). The supervisor adds them in the primary checkout (`uv add -q`, `npm install --silent`) and syncs quietly. Lockfiles and manifests are supervisor-only.
+- A tool that refuses its version (uv `required-version`, `engines`) is fixed in the environment, never worked around.

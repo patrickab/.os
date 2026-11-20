@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Gives a linked git worktree its own `.venv` layered on the primary checkout's venv (idempotent, under a second).
+#
+# The overlay sees every package of the primary venv through a `.pth` file. Extras go into the overlay only:
+#   uv pip install --python .venv/bin/python <package>
+# Never `uv sync`, `uv run` or `uv lock` in the worktree: they rebuild the overlay as a full venv. Dependency changes are
+# made in the primary checkout.
+set -euo pipefail
+
+worktree="$(git rev-parse --show-toplevel)"
+primary="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+primary_python="$primary/.venv/bin/python"
+overlay="$worktree/.venv"
+
+if [[ "$worktree" == "$primary" ]]; then
+    printf 'agent-venv: %s is the primary checkout, use its .venv directly\n' "$primary" >&2
+    exit 2
+fi
+if [[ ! -x "$primary_python" ]]; then
+    printf 'agent-venv: no venv in the primary checkout (%s)\n' "$primary_python" >&2
+    exit 1
+fi
+
+if [[ ! -x "$overlay/bin/python" ]]; then
+    uv venv -q --python "$primary_python" "$overlay"
+fi
+purelib() { "$1" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])'; }
+purelib "$primary_python" > "$(purelib "$overlay/bin/python")/_primary_venv.pth"
+printf '%s\n' "$overlay/bin/python"
