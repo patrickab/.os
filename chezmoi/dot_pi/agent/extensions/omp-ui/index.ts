@@ -3,23 +3,25 @@
  *
  * - Consumes `@oh-my-pi/pi-tui` (pinned in package.json) and the omp theme in `~/.omp/agent/themes`
  * - Display only: messages, session files and model context keep their original content
- * - Pi's `Ctrl+O` drives the cards: collapsed shows what ran (header, summary footer), expanded everything
+ * - Pi's `Ctrl+O` (or a click on the row) drives the cards: collapsed shows what ran (header, summary footer), expanded everything
+ * - bash has its own card (`bash-card.ts`) and gains a `description` parameter, the model's one-line purpose of the call
  * - Failed calls keep omp's output preview while collapsed; any render error falls back to Pi's own row
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { AssistantMessageComponent, type ExtensionAPI, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
+import { AssistantMessageComponent, createBashToolDefinition, type ExtensionAPI, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import { Markdown as PiMarkdown } from "@earendil-works/pi-tui";
 import { Markdown as OmpMarkdown } from "@oh-my-pi/pi-tui/components/markdown";
 import { getMarkdownTheme, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme";
 import { createTheme } from "@oh-my-pi/pi-tui/theme/loader";
-import { bashToolRenderer } from "@oh-my-pi/pi-tui/tools/bash";
 import { editToolRenderer } from "@oh-my-pi/pi-tui/tools/edit";
 import { globToolRenderer } from "@oh-my-pi/pi-tui/tools/glob";
 import { grepToolRenderer } from "@oh-my-pi/pi-tui/tools/grep";
 import { readToolRenderer } from "@oh-my-pi/pi-tui/tools/read";
 import { writeToolRenderer } from "@oh-my-pi/pi-tui/tools/write";
+import { Type } from "typebox";
+import { BASH_DESCRIPTION_GUIDE, renderBashCard } from "./bash-card.ts";
 
 const OMP_THEME_PATH = join(homedir(), ".omp/agent/themes/oh-lucy-evening-custom.json");
 const HASHLINE_PATH_HEADER = /^\[([^\]#\n]+)#[0-9A-Fa-f]{4}\]/m;
@@ -34,10 +36,9 @@ interface OmpToolRenderer {
 	renderResult(result: never, options: object, uiTheme: typeof theme, args: never): Rendered;
 }
 
-/** omp renderer per Pi tool name, other tools keep Pi's row. Pi's `find` is omp's `glob`. */
+/** omp renderer per Pi tool name, other tools keep Pi's row. Pi's `find` is omp's `glob`, bash has its own card. */
 // The renderers take each tool's own argument and details types, unified here for lookup.
 const OMP_TOOL_RENDERERS = {
-	bash: bashToolRenderer,
 	read: readToolRenderer,
 	grep: grepToolRenderer,
 	find: globToolRenderer,
@@ -120,17 +121,28 @@ function patchToolRows(): void {
 	const originalRender = prototype.render;
 	prototype.render = function render(this: PiToolRow, width: number): string[] {
 		const renderer = OMP_TOOL_RENDERERS[this.toolName];
-		if (!renderer) return originalRender.call(this, width);
+		if (!renderer && this.toolName !== "bash") return originalRender.call(this, width);
 		try {
-			return renderOmpCard(this, renderer, width);
+			return renderer ? renderOmpCard(this, renderer, width) : ["", ...renderBashCard(this, theme, width)];
 		} catch {
 			return originalRender.call(this, width);
 		}
 	};
 }
 
-export default function ompUi(_pi: ExtensionAPI): void {
+/**
+ * Pi's bash tool with one more parameter: `description`, which the card shows as its title.
+ * It comes first, so the model states the purpose before it writes the command. Execution is Pi's own and ignores it.
+ */
+function describedBashTool(pi: ExtensionAPI): void {
+	const bash = createBashToolDefinition(process.cwd());
+	const description = Type.Optional(Type.String({ description: BASH_DESCRIPTION_GUIDE }));
+	pi.registerTool({ ...bash, parameters: Type.Object({ description, ...bash.parameters.properties }) });
+}
+
+export default function ompUi(pi: ExtensionAPI): void {
 	setThemeInstance(createTheme(JSON.parse(readFileSync(OMP_THEME_PATH, "utf8"))));
 	patchAnswers();
 	patchToolRows();
+	describedBashTool(pi);
 }
