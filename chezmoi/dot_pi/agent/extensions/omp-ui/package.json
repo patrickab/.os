@@ -1,0 +1,11 @@
+{
+  "name": "omp-ui",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@oh-my-pi/pi-tui": "19.0.1"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

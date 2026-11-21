@@ -1,0 +1,35 @@
+--- a/src/picker-rows.ts	1985-10-26 09:15:00.000000000 +0100
++++ b/src/picker-rows.ts	2026-11-19 23:04:01.377095669 +0100
+@@ -36,6 +36,23 @@
+ 	tier: 0 | 1 | 2;
+ };
+ 
++/** Name order with the first version number descending: "opus-5.5" and "opus-5.5:batch" before "opus-5", then "opus-4.8". */
++function compareNewestFirst(a: string, b: string): number {
++	const split = (name: string) => {
++		const match = /^(\D*)(\d+(?:\.\d+)*)?(.*)$/s.exec(name) as RegExpExecArray;
++		return { prefix: match[1], version: (match[2] ?? "").split(".").filter(Boolean).map(Number), suffix: match[3] };
++	};
++	const x = split(a);
++	const y = split(b);
++	const byPrefix = x.prefix.localeCompare(y.prefix);
++	if (byPrefix !== 0) return byPrefix;
++	for (let i = 0; i < Math.max(x.version.length, y.version.length); i++) {
++		const diff = (y.version[i] ?? 0) - (x.version[i] ?? 0);
++		if (diff !== 0) return diff;
++	}
++	return x.suffix.localeCompare(y.suffix);
++}
++
+ export function buildChatRows<M extends PickerModel>(models: readonly M[]): ChatRow<M>[] {
+ 	const rows: ChatRow<M>[] = models.map((m) => {
+ 		const bench = lookupBenchmark(m.id);
+@@ -55,7 +72,7 @@
+ 			const sb = b.bench?.overallScore ?? -1;
+ 			if (sa !== sb) return sb - sa;
+ 		}
+-		return (a.m.name ?? a.m.id).localeCompare(b.m.name ?? b.m.id);
++		return compareNewestFirst(a.m.name ?? a.m.id, b.m.name ?? b.m.id);
+ 	});
+ 
+ 	// Local rank = position among scored available models (best pickable = #1).

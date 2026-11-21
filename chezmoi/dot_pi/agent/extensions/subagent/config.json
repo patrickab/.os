@@ -1,0 +1,4 @@
+{
+  "maxSubagentDepth": 2,
+  "parallel": { "maxTasks": 10, "concurrency": 10 }
+}

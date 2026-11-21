@@ -1,0 +1,15 @@
+#!/bin/bash
+# Brings Pi's installed packages in line with the list in dot_pi/agent/modify_settings.json, without waiting for the
+# next Pi start, then applies the one local patch. Re-runs when the list or the patch changes:
+# {{ include "dot_pi/agent/modify_settings.json" | sha256sum }}
+# {{ include "../scripts/pix-models-newest-first.patch" | sha256sum }}
+set -euo pipefail
+
+"$HOME/.local/bin/mise" exec -- pi update --extensions
+
+# Newer model versions first in the /models picker. A package update replaces the file, so apply only when missing.
+package="$HOME/.pi/agent/npm/node_modules/@xynogen/pix-models"
+patch_file="{{ .chezmoi.sourceDir }}/../scripts/pix-models-newest-first.patch"
+if ! patch --dry-run --reverse --force --silent -p1 -d "$package" < "$patch_file" > /dev/null 2>&1; then
+    patch --forward -p1 -d "$package" < "$patch_file"
+fi

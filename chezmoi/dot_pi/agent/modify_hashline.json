@@ -1,0 +1,13 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* pi-hashline routing: pin only the default, /hashline keeps its own rules and picks. */ -}}
+{{- $config := dict -}}
+{{- if .chezmoi.stdin -}}
+{{-   $config = fromJson .chezmoi.stdin -}}
+{{- end -}}
+{{- $config = setValueAtPath "defaultUse" "hashline" $config -}}
+{{- /* Unchanged input goes back byte for byte: a reformatted copy differs from what the file's owner wrote, and chezmoi then asks on a TTY that chezmoi-watch does not have. */ -}}
+{{- if and .chezmoi.stdin (eq (toJson $config) (toJson (fromJson .chezmoi.stdin))) -}}
+{{-   .chezmoi.stdin -}}
+{{- else -}}
+{{-   toPrettyJson $config -}}
+{{- end -}}

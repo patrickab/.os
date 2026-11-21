@@ -1,0 +1,14 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* pi-web-access config: pin only the keys below, the extension may write its own. */ -}}
+{{- $config := dict -}}
+{{- if .chezmoi.stdin -}}
+{{-   $config = fromJson .chezmoi.stdin -}}
+{{- end -}}
+{{- /* pi-web-access reads BRAVE_API_KEY itself, but auto mode tries Exa's keyless search first. Make Brave the default, Exa the fallback. */ -}}
+{{- $config = setValueAtPath "searchRouting.providers" (list "brave" "exa") $config -}}
+{{- /* Unchanged input goes back byte for byte: a reformatted copy differs from what the file's owner wrote, and chezmoi then asks on a TTY that chezmoi-watch does not have. */ -}}
+{{- if and .chezmoi.stdin (eq (toJson $config) (toJson (fromJson .chezmoi.stdin))) -}}
+{{-   .chezmoi.stdin -}}
+{{- else -}}
+{{-   toPrettyJson $config -}}
+{{- end -}}

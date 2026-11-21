@@ -1,0 +1,7 @@
+#!/bin/bash
+# Installs omp-ui's npm dependencies next to the extension. Re-runs when its package.json changes:
+# {{ include "dot_pi/agent/extensions/omp-ui/package.json" | sha256sum }}
+set -euo pipefail
+
+cd "$HOME/.pi/agent/extensions/omp-ui"
+npm install --omit=dev --no-audit --no-fund

@@ -1,0 +1,39 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Pi owns ~/.pi/agent/settings.json and rewrites it (packages, changelog state), so only pin the keys below and keep everything else. */ -}}
+{{- $settings := dict -}}
+{{- if .chezmoi.stdin -}}
+{{-   $settings = fromJson .chezmoi.stdin -}}
+{{- end -}}
+{{- $settings = setValueAtPath "theme" "oh-lucy-evening-custom" $settings -}}
+{{- $settings = setValueAtPath "hideThinkingBlock" true $settings -}}
+{{- $settings = setValueAtPath "outputPad" 0 $settings -}}
+{{- /* Codemode lets the model script other tools in JavaScript. A `+` list adds to Pi's default tools. */ -}}
+{{- $settings = setValueAtPath "defaultTools" (list "+codemode") $settings -}}
+{{- /* Pi's packages, declared here: Pi installs a missing one when it starts. Add or remove a line, nothing else.
+       pix-models is a source only (`extensions` empty): extensions/models-picker.ts loads it as /models, because its own
+       extension patches Pi's JS and cannot override /model on the compiled binary. */ -}}
+{{- $packages := list
+      "npm:pi-subagents"
+      "npm:pi-intercom"
+      "npm:pi-interactive-shell"
+      "npm:pi-agent-browser-native"
+      "npm:pi-web-access"
+      "npm:@jangmanj/pi-hashline"
+      (dict "source" "npm:@xynogen/pix-models" "extensions" (list)) -}}
+{{- $settings = setValueAtPath "packages" $packages $settings -}}
+{{- /* pi-subagents: one model per role (oracle judges, scout reads, worker writes, reviewer reviews). Unpinned roles run on the default instead of the parent's model. */ -}}
+{{- $subagents := dict
+      "defaultModel" "anthropic/claude-sonnet-5-5"
+      "agentOverrides" (dict
+        "oracle" (dict "model" "anthropic/claude-fable-5-2" "thinking" "high")
+        "scout" (dict "model" "anthropic/claude-sonnet-5-5" "thinking" "low")
+        "worker" (dict "model" "anthropic/claude-opus-5-5" "thinking" "medium")
+        "reviewer" (dict "model" "anthropic/claude-opus-5-5" "thinking" "high" "tools" (list "read" "grep" "find" "ls" "bash" "write" "watchdog_diff" "contact_supervisor"))
+        "delegate" (dict "model" "anthropic/claude-sonnet-5-5" "thinking" "low")) -}}
+{{- $settings = setValueAtPath "subagents" $subagents $settings -}}
+{{- /* Unchanged input goes back byte for byte: a reformatted copy differs from what the file's owner wrote, and chezmoi then asks on a TTY that chezmoi-watch does not have. */ -}}
+{{- if and .chezmoi.stdin (eq (toJson $settings) (toJson (fromJson .chezmoi.stdin))) -}}
+{{-   .chezmoi.stdin -}}
+{{- else -}}
+{{-   toPrettyJson $settings -}}
+{{- end -}}

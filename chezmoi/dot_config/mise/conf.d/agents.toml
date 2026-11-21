@@ -3,3 +3,5 @@
 [tools]
 oh-my-pi = { version = "latest", lazy = true, auto_update = "4h", minimum_release_age = "0s" }
 pi = { version = "latest", lazy = true, auto_update = "4h", minimum_release_age = "0s" }
+# The browser CLI that the Pi package pi-agent-browser-native drives. `agent-browser install` fetches its Chrome for Testing.
+"npm:agent-browser" = { version = "latest", postinstall = "agent-browser install" }

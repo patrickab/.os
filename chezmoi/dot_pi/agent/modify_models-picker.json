@@ -1,0 +1,13 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* /models picker state (models-picker.ts): pin the deactivated providers, keep recent and selected. */ -}}
+{{- $config := dict -}}
+{{- if .chezmoi.stdin -}}
+{{-   $config = fromJson .chezmoi.stdin -}}
+{{- end -}}
+{{- $config = setValueAtPath "disabled" (list "openrouter" "openai" "google" "deepseek") $config -}}
+{{- /* Unchanged input goes back byte for byte: a reformatted copy differs from what the file's owner wrote, and chezmoi then asks on a TTY that chezmoi-watch does not have. */ -}}
+{{- if and .chezmoi.stdin (eq (toJson $config) (toJson (fromJson .chezmoi.stdin))) -}}
+{{-   .chezmoi.stdin -}}
+{{- else -}}
+{{-   toPrettyJson $config -}}
+{{- end -}}
