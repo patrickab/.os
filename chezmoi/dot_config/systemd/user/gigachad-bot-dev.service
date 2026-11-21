@@ -1,0 +1,20 @@
+[Unit]
+Description=gigachad-bot development stack (run.sh)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=%h/git/gigachad-bot/run.sh
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot
+# The user manager has a bare PATH: give run.sh the same tools an interactive shell has (uv, node, bun, mise, pi).
+Environment=PATH=%h/.pi/agent/bin:%h/.local/share/mise/shims:%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/bin
+ExecStart=%h/git/gigachad-bot/run.sh
+# run.sh traps TERM and stops its children (backend, frontend, pi-host, LearnHarness unit) before exiting.
+KillMode=mixed
+TimeoutStopSec=60s
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
