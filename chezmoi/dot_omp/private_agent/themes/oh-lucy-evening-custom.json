@@ -93,5 +93,11 @@
   },
   "symbols": {
     "preset": "nerd"
+  },
+  "terminal": {
+    "ansi": [
+      "#0E0D12", "#D95555", "#7EC49D", "#EFD472", "#8BB8D0", "#FF7DA3", "#A1CCCE", "#DED7D0",
+      "#686069", "#D95555", "#7EC49D", "#EFD472", "#8BB8D0", "#FF7DA3", "#A1CCCE", "#DED7D0"
+    ]
   }
 }

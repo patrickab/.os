@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Creates, lists and removes git worktrees that are ready to work in: branch, Python overlay venv, JS packages.
+#
+#   agent-worktree create <name> [--base <ref>] [--path <dir>] [--background]
+#   agent-worktree remove <name|path> [--force] [--delete-branch]
+#   agent-worktree list
+#
+# Run it anywhere inside the repository (primary checkout or a worktree).
+#
+# - create: branch `<name>` from `--base` (default: the primary checkout's HEAD) in `--path` (default:
+#   `~/git/worktrees/<repo>/<name>`), prints the path as its last line. An existing branch or directory is refused
+# - Python: `agent-venv`, an overlay on the primary `.venv` (packages installed in the worktree stay in the overlay).
+#   Skipped when the primary checkout has no `.venv`
+# - JS: every `node_modules` of the primary checkout is copied copy-on-write (no extra disk on btrfs/xfs, a full copy
+#   elsewhere). `--background` returns before these copies finish: each `node_modules` appears once it is complete
+# - Submodules: the files of every submodule the primary checkout has initialised are copied copy-on-write, as they
+#   are there, without their `.git`
+# - remove: git refuses a worktree with modified or untracked files unless `--force`. `--delete-branch` deletes the
+#   branch too, also when it is not merged
+set -euo pipefail
+
+die() { printf 'agent-worktree: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+git rev-parse --git-dir > /dev/null 2>&1 || die "not inside a git repository"
+primary="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+repo="$(basename "$primary")"
+default_root="$HOME/git/worktrees/$repo"
+
+# Every `node_modules` of the primary checkout, not looking inside one (relative paths).
+node_modules_dirs() {
+    (cd "$primary" && find . -mindepth 1 -maxdepth 4 \( -name .git -o -name .venv \) -prune -o -name node_modules -prune -print) | sed 's|^\./||'
+}
+
+copy_node_modules() {
+    local worktree="$1" relative target
+    while IFS= read -r relative; do
+        target="$worktree/$relative"
+        # Only where the worktree has the package directory, and no packages yet.
+        [[ -d "$(dirname "$target")" && ! -e "$target" ]] || continue
+        rm -rf "$target.partial"
+        cp -a --reflink=auto "$primary/$relative" "$target.partial"
+        mv "$target.partial" "$target"
+    done < <(node_modules_dirs)
+}
+
+# git would clone each submodule again over the network. The primary checkout already holds the files.
+copy_submodules() {
+    local worktree="$1" relative
+    while IFS= read -r relative; do
+        [[ -d "$worktree/$relative" && -z "$(ls -A "$worktree/$relative")" ]] || continue
+        find "$primary/$relative" -mindepth 1 -maxdepth 1 ! -name .git -exec cp -a --reflink=auto -t "$worktree/$relative" {} +
+    done < <(git -C "$primary" submodule --quiet foreach --recursive 'printf "%s\n" "$displaypath"' 2> /dev/null)
+}
+
+create() {
+    local name="" base="" path="" background=0
+    while (($#)); do
+        case "$1" in
+            --base) base="${2:?--base needs a ref}"; shift 2 ;;
+            --path) path="${2:?--path needs a directory}"; shift 2 ;;
+            --background) background=1; shift ;;
+            -*) die "unknown option $1" 2 ;;
+            *) [[ -z "$name" ]] || die "one name only" 2; name="$1"; shift ;;
+        esac
+    done
+    [[ -n "$name" ]] || die "create needs a name" 2
+    git check-ref-format --branch "$name" > /dev/null 2>&1 || die "'$name' is not a valid branch name" 2
+    path="${path:-$default_root/$name}"
+    [[ ! -e "$path" ]] || die "$path already exists"
+    ! git -C "$primary" show-ref --verify --quiet "refs/heads/$name" || die "branch $name already exists"
+    base="${base:-$(git -C "$primary" rev-parse HEAD)}"
+
+    mkdir -p "$(dirname "$path")"
+    git -C "$primary" worktree add --quiet -b "$name" "$path" "$base" >&2
+    path="$(cd "$path" && pwd -P)"
+    if [[ -x "$primary/.venv/bin/python" ]]; then
+        (cd "$path" && agent-venv > /dev/null)
+    fi
+    copy_submodules "$path"
+    if ((background)); then
+        copy_node_modules "$path" > /dev/null 2>&1 < /dev/null &
+        printf '%s\n' "$!" > "$(git -C "$path" rev-parse --absolute-git-dir)/agent-worktree.pid"
+        disown
+    else
+        copy_node_modules "$path"
+    fi
+    printf '%s\n' "$path"
+}
+
+remove() {
+    local target="" force=() delete_branch=0 path branch dirty pid_file
+    while (($#)); do
+        case "$1" in
+            --force) force=(--force); shift ;;
+            --delete-branch) delete_branch=1; shift ;;
+            -*) die "unknown option $1" 2 ;;
+            *) [[ -z "$target" ]] || die "one worktree only" 2; target="$1"; shift ;;
+        esac
+    done
+    [[ -n "$target" ]] || die "remove needs a name or path" 2
+    if [[ -d "$target" ]]; then path="$(cd "$target" && pwd -P)"; else path="$default_root/$target"; fi
+    [[ "$path" != "$primary" ]] || die "$path is the primary checkout"
+    branch="$(git -C "$path" symbolic-ref --quiet --short HEAD 2> /dev/null || true)"
+    # A background copy of `create` that still runs would keep writing into the directory.
+    pid_file="$(git -C "$path" rev-parse --absolute-git-dir 2> /dev/null || true)/agent-worktree.pid"
+    if [[ -f "$pid_file" ]]; then
+        pkill -P "$(< "$pid_file")" 2> /dev/null || true
+        kill "$(< "$pid_file")" 2> /dev/null || true
+        rm -f "$pid_file"
+    fi
+    # Packages and the overlay venv are the worktree's own setup, never the user's work: git must only look at real
+    # changes, also where a repository does not ignore them. Refuse before touching anything.
+    if [[ -d "$path" && ${#force[@]} -eq 0 ]]; then
+        dirty="$(git -C "$path" status --porcelain -- . ':(exclude).venv' ':(exclude,glob)**/node_modules/**' ':(exclude,glob)**/node_modules.partial/**')"
+        [[ -z "$dirty" ]] || die "$path has modified or untracked files, pass --force to lose them:
+$dirty"
+    fi
+    if [[ -d "$path" ]]; then
+        rm -rf "$path/.venv"
+        (cd "$path" && find . -mindepth 1 -maxdepth 4 -name .git -prune -o \( -name node_modules -o -name node_modules.partial \) -prune -print0 | xargs -0r rm -rf)
+    fi
+    git -C "$primary" worktree remove "${force[@]}" "$path" >&2
+    if ((delete_branch)) && [[ -n "$branch" ]]; then
+        git -C "$primary" branch --quiet -D "$branch" >&2
+    fi
+    printf '%s\n' "$path"
+}
+
+command="${1:-}"
+shift || true
+case "$command" in
+    create) create "$@" ;;
+    remove) remove "$@" ;;
+    list) git -C "$primary" worktree list ;;
+    *) die "usage: agent-worktree create <name> [--base <ref>] [--path <dir>] [--background] | remove <name|path> [--force] [--delete-branch] | list" 2 ;;
+esac

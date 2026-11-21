@@ -223,6 +223,15 @@ def load_leaderboard(csv_path: Path) -> pd.DataFrame:
 
 ```
 
+### Testing
+
+- A coding agent writes the tests for its own task, of two kinds:
+  - **Acceptance tests** prove the task is done. They live outside the repository tree (the run's scratch directory or a temp dir) and never reach a commit
+  - **Lasting tests** stay in the repository. A test earns its place when it covers a contract, a bug that happened, or behaviour a later change breaks easily. Tests of wiring or of a framework do not
+- Before finishing: move every acceptance test that earns a place to the lasting tests, delete the rest, and report each acceptance command with the last line of its output.
+- Never change or delete an existing test without approval (from the supervisor as a subagent, else from the user). A test that fails because the intended behaviour changed is reported, not bent.
+- Tests that need a model run use the cheapest model that shows the behaviour, a trivial task and as few runs as possible.
+
 
 ## 3. Response Patterns
 
@@ -270,6 +279,14 @@ When several items will likely be referenced later present them together as a bu
 - Do not claim completion without evidence.
 - Never add a co-author to a commit message.
 - For completed work, concisely report what has been done. Flag things that the user may need to be aware of.
+- A tool that refuses its version (uv `required-version`, `engines`) is fixed in the environment, never worked around.
+
+### Waiting
+
+- **Wait on a signal, never on a clock**: when a process, job or subagent can report that it finished (a wake-up, a blocking wait, a completion notice), end the turn or block on that. Never `sleep`, never poll on an interval. Poll only when nothing can signal (a remote job), then every 15 s.
+- **Bound every wait**: each launch and each wait gets a timeout, so a hang costs seconds or minutes, never the session. A timeout is a limit, not the way to wait.
+- **Keep bounds short**: size a timeout to what the step should take, not to the worst case. A step that should take seconds gets 30 s, not minutes. Too short costs one retry, too long costs the whole wait.
+- Subagents follow the same rules, in their commands, scripts and test drivers.
 
 ## 6. Documentation and repository context
 
@@ -316,23 +333,29 @@ When several items will likely be referenced later present them together as a bu
 
 ## 7. Long-Running Processes
 
-Run any process that may outlive one tool call or requires live/post-exit inspection (e.g. servers, watchers, builds, training) via `agent-proc`. It runs in tmux session `<repo>`, window `agent-<name>`. Foreground commands that finish within one tool call may run normally.
+Run any process that may outlive one tool call or requires live/post-exit inspection (e.g. servers, watchers, builds, training) as a supervised process. Foreground commands that finish within one tool call may run normally.
 
-* `agent-proc start <name> '<cmd>'`, then tell the user: `tmux attach -t <repo>`
-* `agent-proc logs <name> [lines]` to inspect while running.
-* `agent-proc wait <name> [timeout_s]` to collect the result. Prints the output tail, closes the window, exits with the process's code. 124 = still running (call again), 2 = window vanished.
-* `agent-proc stop <name>` for servers and watchers once no longer needed. Sends C-c, 3s grace, closes the window.
-* `agent-proc ls` lists agent windows with running/exit status.
-* NEVER use raw tmux for agent processes. NEVER infer process state from logs or artifacts.
-* Waiting for a long-running job to finish (local or remote): watch it with a background loop that checks completion every 15 s, e.g. `until <done-check>; do sleep 15; done`. Never use poll intervals of minutes, they delay the follow-up work by up to the full interval.
+- Waiting for a process follows "Waiting" in section 5.
+- NEVER infer process state from logs or artifacts.
+
+**Pi**: the `interactive_shell` tool (skill `interactive-shell`; call `enable_interactive_shell` first when the tool is missing).
+
+- Finite job (tests, build, training): `mode: "dispatch", background: true`, a `name`, a hard `timeout` and `handsFree: { autoExitOnQuiet: false }`. End the turn: the wake-up brings the output tail and the log path
+- Watcher or gate: `mode: "monitor"` with triggers on the lines that matter and a hard `timeout`
+- Server: `mode: "dispatch", background: true`, tell the user they can `/attach`, and kill it once no longer needed
+- Before finishing, kill or dismiss every session you started, except long-lived work the user wants
+
+**Other harnesses**: `agent-proc`, which runs in tmux session `<repo>`, window `agent-<name>`.
+
+- `agent-proc start <name> '<cmd>'`, then tell the user: `tmux attach -t <repo>`
+- `agent-proc logs <name> [lines]` to inspect while running
+- `agent-proc wait <name> [timeout_s]` blocks until the process ends: prints the output tail, closes the window, exits with the process's code. 124 = still running (call again), 2 = window vanished
+- `agent-proc stop <name>` for servers and watchers once no longer needed. Sends C-c, 3s grace, closes the window
+- `agent-proc ls` lists agent windows with running/exit status
+- NEVER use raw tmux for agent processes
 
 ## 8. Subagents
 
-- Implementing a plan, issues or slices with parallel subagents: follow the `parallelize-plan` skill.
+- A subagent knows nothing of this conversation. Its brief states the goal, the files or area, and what to return.
+- As a subagent: return the result with its evidence, concisely.
 - Message other sessions only when they work on the same or a related codebase.
-- Parallel coding agents work in isolated checkouts (omp `isolated: true`, Pi: one git worktree per agent), never in the shared checkout.
-- In a worktree, reuse the primary checkout's tooling instead of installing it again:
-  - Python: run `agent-venv` once. It prints the worktree's `.venv/bin/python`, an overlay that sees every package of the primary venv. Run tools through it (`.venv/bin/python -m pytest`). Packages the task needs on top: `uv pip install --python .venv/bin/python <pkg>`, they stay in the overlay. Never `uv sync`, `uv run` or `uv lock` in a worktree
-  - JS: `node_modules` comes with the checkout (omp's clone copies it copy-on-write), else `cp -a --reflink=always "$PRIMARY/<dir>/node_modules" <dir>/` with `PRIMARY=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")`. Never `npm install` in a worktree
-- Dependency changes go into the report (package, version, why). The supervisor adds them in the primary checkout (`uv add -q`, `npm install --silent`) and syncs quietly. Lockfiles and manifests are supervisor-only.
-- A tool that refuses its version (uv `required-version`, `engines`) is fixed in the environment, never worked around.

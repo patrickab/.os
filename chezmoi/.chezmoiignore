@@ -20,3 +20,6 @@
 
 # Omarchy's shell settings UI rewrites the bar layout, so it stays machine-local.
 .config/omarchy/shell.json
+
+# Repo docs, not config.
+.pi/README.md
