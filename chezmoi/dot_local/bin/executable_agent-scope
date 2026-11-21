@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# agent-scope <cmd...>: run an agent so that when it exits, every process it left behind is killed.
+# - Transient systemd user service, KillMode=control-group: setsid/daemonized children stay in the cgroup
+# - Own tmux socket per run, so agent-proc windows die with the run and never touch other runs
+set -euo pipefail
+unit="agent-$(basename "$1")-$$"
+setenv=(); for var in $(compgen -e); do setenv+=(--setenv="$var"); done
+exec systemd-run --user --quiet --pty --wait --collect --same-dir \
+  --unit="$unit" -p KillMode=control-group -p SendSIGHUP=yes -p TimeoutStopSec=5 \
+  "${setenv[@]}" --setenv=AGENT_PROC_SOCKET="$unit" -- "$@"

@@ -61,6 +61,10 @@ export PATH="/home/linuxbrew/.linuxbrew/bin:$HOME/.local/bin:$PATH"
 # mise: put its tools (pi, omp) on PATH. Omarchy activates mise itself, so skip if already active.
 [[ -z "${MISE_SHELL:-}" ]] && command -v mise >/dev/null && eval "$(mise activate bash)"
 
+# Agents run in a systemd cgroup: exiting kills every leftover child (browsers, agent-proc, shells)
+pi() { agent-scope pi "$@"; }
+omp() { agent-scope omp "$@"; }
+
 # --- Oh My Posh (Prompt) ---
 # Initialize Oh My Posh if installed
 eval "$(oh-my-posh init bash --config ~/.ohmyposhtheme.omp.json)"

@@ -25,7 +25,7 @@ start) # start <name> <shell command>
     tmux set -w -t "$TMUX_PANE" @rc "$rc"
     sleep "$2"' agent-proc "$*" "$TTL")
   "${T[@]}" set -w -t "$id" @agent 1
-  echo "started agent-$name. Watch: tmux attach -t $S" ;;
+  echo "started agent-$name. Watch: tmux ${AGENT_PROC_SOCKET:+-L $AGENT_PROC_SOCKET }attach -t $S" ;;
 wait) # wait <name> [timeout_s=600]: on exit print tail, close window, return rc
   need "${1:?name}"; end=$((SECONDS + ${2:-600}))
   until rc=$(rc_of "$id") && [ -n "$rc" ]; do
