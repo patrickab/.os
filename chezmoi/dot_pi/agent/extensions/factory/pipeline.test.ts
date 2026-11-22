@@ -11,25 +11,20 @@ const config: FactoryConfig = {
   protected: DEFAULT_PROTECTED,
 };
 
-function snapshotOf(settings: Partial<Settings> = {}, round = 1, runFirstRound = 1, worktree = false): Snapshot {
+function snapshotOf(settings: Partial<Settings> = {}, round = 1, runFirstRound = 1): Snapshot {
   return {
     task: {
       title: "T",
       request: "R",
       settings: { branch: "main", merge: "auto", maxRounds: 3, review: true, models: {}, ...settings },
-      worktree,
-      branch: worktree ? "task" : "main",
+      branch: "task",
       mainBranch: "main",
       baseSha: "abc",
-      baseTree: "tree",
     },
     state: "running",
     round,
     runFirstRound,
     reason: "start",
-    mergedBase: null,
-    head: null,
-    roundTree: null,
     mergeIntent: null,
     mergeError: null,
   };
@@ -45,7 +40,7 @@ function reviewOf(status: ReviewStatus, severities: ("blocker" | "major" | "mino
   return { round: 1, status, approved, findings, model: "m", sessionFile: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, wallMs: 1 };
 }
 
-const merged: MergeData = { ok: true, kind: "commit", commit: "def", error: null, depsSynced: false, mixed: [], tree: "left" };
+const merged: MergeData = { ok: true, commit: "def", error: null, depsSynced: false };
 
 /** Steps where everything passes, with the calls recorded in `calls`. */
 function fakeSteps(overrides: Partial<PipelineSteps> = {}): PipelineSteps & { calls: string[] } {
@@ -60,7 +55,7 @@ function fakeSteps(overrides: Partial<PipelineSteps> = {}): PipelineSteps & { ca
       calls.push(argv.join(" "));
       return commandResult(0);
     },
-    diff: async () => ({ base: "tree", tree: "now", paths: ["src/a.ts"], patch: "diff" }),
+    diff: async () => ({ base: "tree", paths: ["src/a.ts"], patch: "diff" }),
     review: async () => {
       calls.push("review");
       return reviewOf("ok");
@@ -165,23 +160,13 @@ describe("runRound", () => {
   });
 
   test("a diff that touches a protected path is a round problem and is never reviewed or merged", async () => {
-    const steps = fakeSteps({ diff: async () => ({ base: "tree", tree: "now", paths: ["src/a.ts", "factory.yaml", ".factory/agents/coder.md"], patch: "diff" }) });
-    const snapshot = snapshotOf();
-    const result = await runRound({ ...snapshot, task: { ...snapshot.task, worktree: true, baseTree: null } }, steps);
+    const steps = fakeSteps({ diff: async () => ({ base: "tree", paths: ["src/a.ts", "factory.yaml", ".factory/agents/coder.md"], patch: "diff" }) });
+    const result = await runRound(snapshotOf(), steps);
     expect(steps.calls).toEqual(["fmt", "lint", "test"]);
     expect(result.entries.at(-2)).toMatchObject({ data: { round: 2, trigger: "protected" } });
     expect((result.entries.at(-1) as { content: string }).content).toContain("- factory.yaml\n- .factory/agents/coder.md");
+    expect((result.entries.at(-1) as { content: string }).content).toContain("Restore them to their original state, then stop.");
     expect(result.continue).toBe(true);
-  });
-
-  test("in the user's checkout a protected path blocks the task with the paths: no model is asked to restore it", async () => {
-    const steps = fakeSteps({ diff: async () => ({ base: "tree", tree: "now", paths: ["factory.yaml", "src/a.ts"], patch: "diff" }) });
-    const result = await runRound(snapshotOf(), steps);
-    expect(result).toEqual({ entries: [...result.entries.slice(0, -1), stateDraft("blocked", 1, "protected: factory.yaml")], continue: false });
-    expect(result.entries.some((draft) => draft.type === "custom_message")).toBe(false);
-    const snapshot = snapshotOf();
-    const worktree = (await runRound({ ...snapshot, task: { ...snapshot.task, worktree: true, baseTree: null } }, steps)).entries.at(-1) as { content: string };
-    expect(worktree.content).toContain("Restore them to their original state, then stop.");
   });
 
   test("blocker and major findings go back to the coder, minor ones do not stop the merge", async () => {
@@ -265,40 +250,33 @@ describe("runRound", () => {
 
 test("a rebase the coder left open goes back to the coder before any hook or gate runs", async () => {
   const steps = fakeSteps({ openRebase: async () => ["notes.txt"] });
-  const result = await runRound(snapshotOf({}, 2, 1, true), steps);
+  const result = await runRound(snapshotOf({}, 2, 1), steps);
   expect(result.continue).toBe(true);
   expect(result.entries[0]).toMatchObject({ data: { round: 3, trigger: "conflict" } });
   expect((result.entries[1] as { content: string }).content).toContain("A rebase is still in progress in the task worktree");
   expect(steps.calls).toEqual([]);
-  // A current-checkout task never asks.
-  const checkout = fakeSteps({ openRebase: async () => ["notes.txt"] });
-  expect((await runRound(snapshotOf({}, 2), checkout)).continue).toBe(false);
 });
 
 describe("runMerge", () => {
   const gate = { round: 2, phase: "merge_gates" as const, argv: ["lint"], exitCode: 0, killed: false, durationMs: 1, outputTail: "" };
 
-  test("records the merge gates before the merge and reports a worktree merge as merged", async () => {
-    const steps = fakeSteps({ merge: async () => ({ gates: [gate], merge: { ...merged, kind: "merge", tree: null }, conflicts: null, failedGate: null }) });
+  test("records the merge gates before the merge and reports the merge as merged", async () => {
+    const steps = fakeSteps({ merge: async () => ({ gates: [gate], merge: { ...merged, tree: null }, conflicts: null, failedGate: null }) });
     const entries = await runMerge(snapshotOf({}, 2), config, steps);
     expect(kinds(entries)).toEqual(["factory-gate", "factory-merge", "factory-state"]);
     expect(lastState(entries)).toEqual({ state: "done", round: 2, reason: "merged" });
   });
 
-  test("a current-checkout commit ends committed", async () => {
-    expect(lastState(await runMerge(snapshotOf(), config, fakeSteps()))).toEqual({ state: "done", round: 1, reason: "committed" });
-  });
-
   test("a failed after_merge hook is recorded and leaves the task done with a reason that says so", async () => {
     const hook = { ...gate, phase: "after_merge" as const, argv: ["uv", "sync"], exitCode: 1, outputTail: "no network" };
-    const data: MergeData = { ok: true, kind: "merge", commit: "def", error: "after_merge failed: uv sync: no network", depsSynced: false, tree: null, mixed: [] };
+    const data: MergeData = { ok: true, commit: "def", error: "after_merge failed: uv sync: no network", depsSynced: false };
     const entries = await runMerge(snapshotOf({}, 2), config, fakeSteps({ merge: async () => ({ gates: [hook], merge: data, conflicts: null, failedGate: null }) }));
     expect(entries[0]).toMatchObject({ customType: "factory-gate", data: { phase: "after_merge", exitCode: 1 } });
     expect(entries[1]).toMatchObject({ customType: "factory-merge", data: { ok: true, error: "after_merge failed: uv sync: no network" } });
     expect(lastState(entries)).toEqual({ state: "done", round: 2, reason: "merged, after_merge failed" });
   });
 
-  const failed: MergeData = { ok: false, kind: "merge", commit: null, error: "fast-forward of main refused", depsSynced: false, tree: null, mixed: [] };
+  const failed: MergeData = { ok: false, commit: null, error: "fast-forward of main refused", depsSynced: false };
 
   test("a failed merge blocks the task", async () => {
     const entries = await runMerge(snapshotOf(), config, fakeSteps({ merge: async () => ({ gates: [], merge: failed, conflicts: null, failedGate: null }) }));
@@ -308,21 +286,21 @@ describe("runMerge", () => {
 
   test("a rebase conflict merges nothing and opens a conflict round within the budget, then blocks with max_rounds: conflict", async () => {
     const conflicting = fakeSteps({ merge: async () => ({ gates: [], merge: failed, conflicts: ["notes.txt"], failedGate: null }) });
-    const entries = await runMerge(snapshotOf({ maxRounds: 3 }, 2, 1, true), config, conflicting);
+    const entries = await runMerge(snapshotOf({ maxRounds: 3 }, 2, 1), config, conflicting);
     expect(kinds(entries)).toEqual(["factory-round", "custom_message", "factory-state"]);
     expect(entries[0]).toMatchObject({ data: { round: 3, trigger: "conflict" } });
     expect(entries[1]).toMatchObject({ details: { round: 2, trigger: "conflict" } });
     expect((entries[1] as { content: string }).content).toContain("- notes.txt\nRun `git rebase refs/heads/main`, resolve the conflicts");
     expect(lastState(entries)).toEqual({ state: "running", round: 3, reason: "conflict" });
 
-    const last = await runMerge(snapshotOf({ maxRounds: 3 }, 3, 1, true), config, conflicting);
+    const last = await runMerge(snapshotOf({ maxRounds: 3 }, 3, 1), config, conflicting);
     expect(kinds(last)).toEqual(["custom_message", "factory-state"]);
     expect(lastState(last)).toEqual({ state: "blocked", round: 3, reason: "max_rounds: conflict" });
   });
 
   test("a merge gate that fails on the rebased branch goes back to the coder as a gates round, nothing merged", async () => {
     const failedGate = { argv: ["test"], result: commandResult(1, "FAILED test_new_thing") };
-    const entries = await runMerge(snapshotOf({ maxRounds: 3 }, 2, 1, true), config, fakeSteps({ merge: async () => ({ gates: [], merge: failed, conflicts: null, failedGate }) }));
+    const entries = await runMerge(snapshotOf({ maxRounds: 3 }, 2, 1), config, fakeSteps({ merge: async () => ({ gates: [], merge: failed, conflicts: null, failedGate }) }));
     expect(kinds(entries)).toEqual(["factory-round", "custom_message", "factory-state"]);
     expect((entries[1] as { content: string }).content).toContain("After the rebase onto main");
     expect((entries[1] as { content: string }).content).toContain("FAILED test_new_thing");
@@ -331,7 +309,7 @@ describe("runMerge", () => {
 
   test("a merge gate that exits 75 blocks the task as infra", async () => {
     const failedGate = { argv: ["test"], result: commandResult(75, "pi-host/node_modules is missing") };
-    const entries = await runMerge(snapshotOf({}, 1, 1, true), config, fakeSteps({ merge: async () => ({ gates: [], merge: failed, conflicts: null, failedGate }) }));
+    const entries = await runMerge(snapshotOf({}, 1, 1), config, fakeSteps({ merge: async () => ({ gates: [], merge: failed, conflicts: null, failedGate }) }));
     expect(lastState(entries)).toEqual({ state: "blocked", round: 1, reason: "infra: pi-host/node_modules is missing" });
   });
 

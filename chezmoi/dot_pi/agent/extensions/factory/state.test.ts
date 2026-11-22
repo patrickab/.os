@@ -5,11 +5,9 @@ const task: Task = {
   title: "Add notes",
   request: "Create notes.txt",
   settings: { branch: "main", merge: "auto", maxRounds: 3, review: true, models: {} },
-  worktree: false,
-  branch: "main",
+  branch: "task",
   mainBranch: "main",
   baseSha: "abc",
-  baseTree: null,
 };
 
 const custom = (customType: string, data: unknown) => ({ type: "custom", customType, data });
@@ -28,16 +26,18 @@ describe("rebuild", () => {
       { type: "message" },
       custom("factory-gate", { round: 1 }),
       custom("factory-round", { round: 2, trigger: "gates" }),
-      custom("factory-merge", { ok: false, kind: "commit", commit: null, error: "x", depsSynced: false }),
-      custom("factory-merge", { ok: true, kind: "commit", commit: "def", error: null, depsSynced: false }),
-      custom("factory-state", { state: "done", round: 2, reason: "committed" }),
+      custom("factory-merge-intent", { commit: "def", before: "abc" }),
+      custom("factory-merge", { ok: false, commit: null, error: "x", depsSynced: false }),
     ]);
-    expect(snapshot).toEqual({ task, state: "done", round: 2, runFirstRound: 1, reason: "committed", mergedBase: "def", head: "def", roundTree: null, mergeIntent: null, mergeError: null });
-  });
-
-  test("after a current-checkout commit the diff base is the tree it left, not the commit", () => {
-    const entries = [custom("factory-task", task), custom("factory-merge", { ok: true, kind: "commit", commit: "def", error: null, depsSynced: false, tree: "left" })];
-    expect(rebuild(entries)?.mergedBase).toBe("left");
+    expect(snapshot).toMatchObject({ state: "running", round: 2, mergeIntent: null, mergeError: "x" });
+    const done = rebuild([
+      custom("factory-task", task),
+      custom("factory-round", { round: 1, trigger: "start" }),
+      custom("factory-merge", { ok: false, commit: null, error: "x", depsSynced: false }),
+      custom("factory-merge", { ok: true, commit: "def", error: null, depsSynced: false }),
+      custom("factory-state", { state: "done", round: 1, reason: "merged" }),
+    ]);
+    expect(done).toEqual({ task, state: "done", round: 1, runFirstRound: 1, reason: "merged", mergeIntent: null, mergeError: null });
   });
 
   test("message and retry open a run with a fresh round budget", () => {
@@ -70,8 +70,8 @@ describe("parseStartPayload", () => {
 
   test("returns the payload", () => {
     expect(parseStartPayload(JSON.stringify({ request: "do it", title: "T", settings }))).toEqual({ request: "do it", title: "T", settings });
-    const withSource = { ...settings, sourceBranch: "feature" };
-    expect(parseStartPayload(JSON.stringify({ request: "do it", title: "T", settings: withSource })).settings).toEqual(withSource);
+    // A key the plugin does not know (an older caller's `sourceBranch`) is dropped, not refused.
+    expect(parseStartPayload(JSON.stringify({ request: "do it", title: "T", settings: { ...settings, sourceBranch: "feature" } })).settings).toEqual(settings);
   });
 
   test.each([
@@ -82,7 +82,6 @@ describe("parseStartPayload", () => {
     [JSON.stringify({ request: "r", title: "T" }), "settings must be an object"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, branch: undefined } }), "settings.branch must be a non-empty string"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, branch: "" } }), "settings.branch must be a non-empty string"],
-    [JSON.stringify({ request: "r", title: "T", settings: { ...settings, sourceBranch: "" } }), "settings.sourceBranch must be a non-empty string"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, merge: "manual" } }), 'settings.merge must be "auto" or "review"'],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, maxRounds: 0 } }), "settings.maxRounds must be a positive integer"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, review: "yes" } }), "settings.review must be a boolean"],

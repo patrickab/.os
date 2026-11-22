@@ -7,10 +7,7 @@
  * - Provides the checks a merge needs before it writes: the checkout is on its branch with no git operation in
  *   progress (`assertCheckoutReady`). Tells a rebase in progress and its conflicting files (`rebaseInProgress`), and
  *   aborts one a killed merge left behind (`abortLeftoverRebase`)
- * - Provides a current-checkout task's diff base taken again after its HEAD moved (`treeWithPathsOf`)
- * - Provides where a worktree task's own change starts (`taskBase`), and for a task with its own source branch the
- *   upstream it is rebased onto: the merge of its target and source branch (`nextUpstream`, `upstreamMoved`)
- * - Keeps a tree a task still needs from git's garbage collection (`keepTree`)
+ * - Provides where the task's own change starts (`taskBase`) and whether its target branch moved past it (`targetMoved`)
  * - Nothing here writes the checkout's own index or its files: staging goes through a scratch index
  */
 import { existsSync, realpathSync } from "node:fs";
@@ -18,7 +15,7 @@ import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Exec } from "./run.ts";
-import { hasOwnSource, upstreamRef, type Task } from "./state.ts";
+import type { Task } from "./state.ts";
 
 const ERROR_TAIL_CHARS = 1000;
 /** Upper bound of what one git call may print: path lists and file contents, never a whole patch. */
@@ -44,7 +41,7 @@ export function nulList(text: string): string[] {
   return text.split("\0").filter((path) => path !== "");
 }
 
-export type TaskGit = Pick<Task, "worktree" | "branch" | "mainBranch" | "baseSha" | "baseTree">;
+export type TaskGit = Pick<Task, "branch" | "mainBranch" | "baseSha">;
 
 /** Primary checkout of the repository `cwd` belongs to, and its git directory (where the merge lock lives). */
 export async function primaryCheckout(exec: Exec, cwd: string): Promise<{ primary: string; gitDir: string }> {
@@ -80,46 +77,27 @@ export async function stageTree(exec: Exec, root: string, env: { GIT_INDEX_FILE:
   return git(exec, root, ["write-tree"], env);
 }
 
-/**
- * Points `refs/factory/<session id>/<name>` at a commit of `tree`. A snapshot tree is referenced by nothing else, and
- * `git gc` prunes it once it is older than `gc.pruneExpire`. The backend deletes the refs with the task.
- */
-export async function keepTree(exec: Exec, root: string, sessionId: string, name: "base" | "round", tree: string): Promise<void> {
-  const commit = await git(exec, root, ["commit-tree", "--no-gpg-sign", tree, "-m", `factory ${name}`]);
-  await git(exec, root, ["update-ref", `refs/factory/${sessionId}/${name}`, commit]);
-}
-
 /** Tree id of the working tree of `root` as it is now: tracked and untracked files, ignored ones left out. */
 export function snapshotTree(exec: Exec, root: string): Promise<string> {
   return withScratchIndex(exec, root, (env) => stageTree(exec, root, env));
 }
 
 /**
- * Throws when `cwd` is not the root of a git checkout on a branch with at least one commit. A worktree task's main
- * branch is `target` (`settings.branch`), which must exist. A current-checkout task is its own main branch and also
- * gets `baseTree`, the working tree at this moment: what is already there is the user's, not the task's.
+ * The task's git identity. Throws when `cwd` is not the root of a linked git worktree on a branch with at least one
+ * commit, or the branch it merges into (`target`, `settings.branch`) does not exist. A task never runs in the
+ * repository's main checkout: that tree is the user's.
  */
 export async function taskGit(exec: Exec, cwd: string, target: string): Promise<TaskGit> {
   const lines = await git(exec, cwd, ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir", "HEAD"]);
   const [toplevel, gitDir, commonDir, baseSha] = lines.split("\n");
   if (realpathSync(toplevel) !== realpathSync(cwd)) throw new Error(`${cwd} is not the root of its git checkout (${toplevel})`);
-  const worktree = gitDir !== commonDir;
+  if (gitDir === commonDir) throw new Error(`${cwd} is the repository's main checkout: a factory task runs in a git worktree of its own`);
   const branch = await git(exec, cwd, ["symbolic-ref", "--short", "HEAD"]);
-  if (worktree && (await exec(["git", "rev-parse", "--verify", "--quiet", `refs/heads/${target}`], { cwd })).exitCode !== 0) {
-    throw new Error(`the target branch ${target} does not exist`);
+  if ((await exec(["git", "rev-parse", "--verify", "--quiet", `refs/heads/${target}`], { cwd })).exitCode !== 0) {
+    throw new Error(`the branch ${target} does not exist`);
   }
-  const mainBranch = worktree ? target : branch;
-  return { worktree, branch, mainBranch, baseSha, baseTree: worktree ? null : await snapshotTree(exec, cwd) };
-}
-
-/**
- * The commit or tree a task's diff is taken against. `baseSha` goes stale once the pipeline rebases the branch, so a
- * worktree task uses where its own change starts (`taskBase`). A current-checkout task uses the tree its last commit
- * left in the working directory, before that the tree it started in.
- */
-export async function diffBase(exec: Exec, root: string, task: Task, mergedBase: string | null): Promise<string> {
-  if (task.worktree) return taskBase(exec, root, task);
-  return mergedBase ?? task.baseTree ?? task.baseSha;
+  if (branch === target) throw new Error(`the worktree is on ${target} itself: a task works on a branch of its own`);
+  return { branch, mainBranch: target, baseSha };
 }
 
 /** Whether `ancestor` is an ancestor of (or is) `commit`. Throws when git fails otherwise. */
@@ -129,55 +107,17 @@ async function isAncestor(exec: Exec, root: string, ancestor: string, commit: st
   throw new Error(`git merge-base --is-ancestor ${ancestor} ${commit}: ${result.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
 }
 
-/** The commit `ref` points at, null without one. */
-async function refCommit(exec: Exec, root: string, ref: string): Promise<string | null> {
-  const result = await exec(["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: root, maxStdoutChars: 100 });
-  return result.exitCode === 0 && !result.killed ? result.stdout.trim() : null;
-}
-
 /**
- * The commit a worktree task's own change sits on: what is in it is not the task's. A task on its target alone: the
- * merge base of HEAD and the target. A task with its own source: the newest of its upstreams (`next`, then `base`)
- * that HEAD holds, before the first rebase the merge base of HEAD and the source branch it started from.
+ * The commit the task's own change sits on, the merge base of HEAD and its target branch: what is in it is not the
+ * task's. The diff is taken against it, and `factory.yaml` and the role prompts are read from it.
  */
-export async function taskBase(exec: Exec, root: string, task: Task): Promise<string> {
-  if (!hasOwnSource(task)) return git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
-  for (const name of ["next", "base"] as const) {
-    const upstream = await refCommit(exec, root, upstreamRef(task, name));
-    if (upstream && (await isAncestor(exec, root, upstream, "HEAD"))) return upstream;
-  }
-  const fallback = (await refCommit(exec, root, upstreamRef(task, "base"))) ?? `refs/heads/${task.settings.sourceBranch}`;
-  return git(exec, root, ["merge-base", "HEAD", fallback]);
+export function taskBase(exec: Exec, root: string, task: Task): Promise<string> {
+  return git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
 }
 
-/**
- * A task with its own source: the upstream to rebase onto now, the target and the source branch as they are, merged.
- * One that holds the other is the upstream itself. The merge is a commit with the target as first parent; one of the
- * task's upstreams that already merges these two is taken again, so an upstream changes only when a branch moved.
- * Throws when the two do not merge cleanly.
- */
-export async function nextUpstream(exec: Exec, root: string, task: Task): Promise<string> {
-  const source = task.settings.sourceBranch as string;
-  const target = await git(exec, root, ["rev-parse", "--verify", `refs/heads/${task.mainBranch}^{commit}`]);
-  const tip = await git(exec, root, ["rev-parse", "--verify", `refs/heads/${source}^{commit}`]);
-  if (await isAncestor(exec, root, tip, target)) return target;
-  if (await isAncestor(exec, root, target, tip)) return tip;
-  for (const name of ["next", "base"] as const) {
-    const upstream = await refCommit(exec, root, upstreamRef(task, name));
-    if (upstream && (await git(exec, root, ["rev-list", "--parents", "-n", "1", upstream])) === `${upstream} ${target} ${tip}`) return upstream;
-  }
-  const merged = await exec(["git", "merge-tree", "--write-tree", "--name-only", "--no-messages", target, tip], { cwd: root, maxStdoutChars: GIT_STDOUT_MAX_CHARS });
-  const [tree, ...conflicts] = merged.stdout.trim().split("\n");
-  if (merged.exitCode === 1 && !merged.killed) throw new Error(`the source branch ${source} does not merge cleanly into ${task.mainBranch}: ${conflicts.join(", ")}`);
-  if (merged.exitCode !== 0 || merged.killed) throw new Error(`git merge-tree: ${merged.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
-  return git(exec, root, ["commit-tree", "--no-gpg-sign", tree, "-p", target, "-p", tip, "-m", `Merge branch '${source}' into ${task.mainBranch}`]);
-}
-
-/** Whether the task branch no longer holds its target branch, or for a task with its own source its source branch. */
-export async function upstreamMoved(exec: Exec, root: string, task: Task): Promise<boolean> {
-  const branches = hasOwnSource(task) ? [task.mainBranch, task.settings.sourceBranch as string] : [task.mainBranch];
-  for (const branch of branches) if (!(await isAncestor(exec, root, `refs/heads/${branch}`, "HEAD"))) return true;
-  return false;
+/** Whether the target branch holds commits the task branch does not build on yet. */
+export async function targetMoved(exec: Exec, root: string, task: Task): Promise<boolean> {
+  return !(await isAncestor(exec, root, `refs/heads/${task.mainBranch}`, "HEAD"));
 }
 
 const GIT_OPERATIONS = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"];
@@ -204,26 +144,6 @@ export async function rebaseInProgress(exec: Exec, root: string): Promise<string
   return nulList(await git(exec, root, ["diff", "--name-only", "--diff-filter=U", "-z"]));
 }
 
-/**
- * `tree` with `paths` as they are in `base`, a path missing there left out. A current-checkout task whose HEAD moved
- * takes its diff base again this way: its own paths keep the old base, everything else is the tree as it is now.
- */
-export async function treeWithPathsOf(exec: Exec, root: string, tree: string, base: string, paths: string[]): Promise<string> {
-  if (paths.length === 0) return tree;
-  return withScratchIndex(exec, root, async (env) => {
-    await git(exec, root, ["read-tree", tree], env);
-    await git(exec, root, ["--literal-pathspecs", "rm", "--cached", "--force", "--quiet", "--ignore-unmatch", "-r", "--", ...paths], env);
-    const entries = nulList(await git(exec, root, ["--literal-pathspecs", "ls-tree", "-r", "-z", base, "--", ...paths]));
-    const cacheinfo = entries.flatMap((entry) => {
-      const [meta, path] = entry.split("\t");
-      const [mode, , sha] = meta.split(" ");
-      return ["--cacheinfo", `${mode},${sha},${path}`];
-    });
-    if (cacheinfo.length > 0) await git(exec, root, ["update-index", "--add", ...cacheinfo], env);
-    return git(exec, root, ["write-tree"], env);
-  });
-}
-
 /** Aborts a rebase that a killed merge left behind in `root`. `exec` must be one a cancel does not stop. */
 export async function abortLeftoverRebase(exec: Exec, root: string): Promise<void> {
   const operations = await operationsInProgress(exec, root);
@@ -233,8 +153,6 @@ export async function abortLeftoverRebase(exec: Exec, root: string): Promise<voi
 export interface TaskDiff {
   /** What the diff is taken against, a commit or a tree. */
   base: string;
-  /** The working tree the diff was taken of. */
-  tree: string;
   /** Changed paths relative to the repo root. A rename lists both of its paths. */
   paths: string[];
   /** Source first, lockfiles last. Cut at a size no review reads. */
@@ -254,5 +172,5 @@ export async function taskDiff(exec: Exec, root: string, base: string): Promise<
   };
   const source = await patchOf([".", ...LOCKFILES.map((name) => `:(exclude,glob)**/${name}`)]);
   const locks = await patchOf(LOCKFILES.map((name) => `:(glob)**/${name}`));
-  return { base, tree, paths, patch: source + locks };
+  return { base, paths, patch: source + locks };
 }

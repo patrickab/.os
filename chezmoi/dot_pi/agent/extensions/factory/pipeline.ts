@@ -4,10 +4,10 @@
  * - Consumes the task `Snapshot` and `PipelineSteps` (the side effects: commands, diff, review, merge)
  * - Provides `runRound`: the entries of the round in order, and whether the coder gets another turn. A passed `auto`
  *   round ends in `merging` and does not merge: the caller merges once it knows the run was not aborted
- * - Provides `runMerge`: the entries of a merge, used after a passed `auto` round and by `/factory approve`. A worktree
- *   task is rebased onto its target branch first. A rebase that conflicts gets a `conflict` round, a merge gate that
+ * - Provides `runMerge`: the entries of a merge, used after a passed `auto` round and by `/factory approve`. The task
+ *   is rebased onto its target branch first. A rebase that conflicts gets a `conflict` round, a merge gate that
  *   fails on the rebased branch a `gates` round: the coder resolves it and the task merges once that round passes
- * - A rebase the coder left open in a worktree task goes back to the coder as a `conflict` round before anything runs
+ * - A rebase the coder left open in the worktree goes back to the coder as a `conflict` round before anything runs
  * - A hook or gate that exits `INFRA_EXIT` (75, EX_TEMPFAIL) says the environment is broken, not the change: the task
  *   ends `blocked`, `infra: <last output line>`, without feedback to the coder. A retry starts the next round once it is fixed
  */
@@ -23,7 +23,6 @@ import {
   gateData,
   passed,
   protectedFeedback,
-  rebaseOnto,
   reviewFeedback,
   roundsUsed,
   stateDraft,
@@ -45,7 +44,7 @@ export interface PipelineSteps {
   diff(): Promise<TaskDiff>;
   review(round: number, diff: TaskDiff): Promise<ReviewData>;
   merge(config: FactoryConfig): Promise<MergeOutcome>;
-  /** Worktree task: the conflicting files of a rebase in progress in its checkout, null when none is. */
+  /** The conflicting files of a rebase in progress in the task's worktree, null when none is. */
   openRebase(): Promise<string[] | null>;
 }
 
@@ -95,7 +94,7 @@ export async function runMerge(snapshot: Snapshot, config: FactoryConfig, steps:
   if ((conflicts || failedGate) && steps.cancelled()) return [...drafts, stateDraft("cancelled", round, "cancelled")];
   if (failedGate?.result.exitCode === INFRA_EXIT && !failedGate.result.killed) return [...drafts, stateDraft("blocked", round, `infra: ${lastLine(failedGate.result.output)}`)];
   const problem = conflicts
-    ? { trigger: "conflict" as const, text: conflictFeedback(round, snapshot.task.mainBranch, conflicts, false, rebaseOnto(snapshot.task)) }
+    ? { trigger: "conflict" as const, text: conflictFeedback(round, snapshot.task.mainBranch, conflicts, false) }
     : failedGate
       ? { trigger: "gates" as const, text: `After the rebase onto ${snapshot.task.mainBranch}: ${commandFeedback(round, failedGate.argv, failedGate.result)}` }
       : null;
@@ -106,7 +105,7 @@ export async function runMerge(snapshot: Snapshot, config: FactoryConfig, steps:
   }
   drafts.push(customDraft("factory-merge", merge));
   // A failed `after_merge` hook cannot undo the merge: the task is done, and says what is left to do.
-  if (merge.ok) drafts.push(stateDraft("done", round, merge.kind === "commit" ? "committed" : merge.error ? "merged, after_merge failed" : "merged"));
+  if (merge.ok) drafts.push(stateDraft("done", round, merge.error ? "merged, after_merge failed" : "merged"));
   else if (steps.cancelled()) drafts.push(stateDraft("cancelled", round, "cancelled"));
   else drafts.push(stateDraft("blocked", round, "merge_failed"));
   return drafts;
@@ -132,8 +131,8 @@ export async function runRound(snapshot: Snapshot, steps: PipelineSteps): Promis
 
   try {
     const config = steps.config();
-    const conflicts = task.worktree ? await steps.openRebase() : null;
-    if (conflicts) return problem("conflict", conflictFeedback(round, task.mainBranch, conflicts, true, rebaseOnto(task)));
+    const conflicts = await steps.openRebase();
+    if (conflicts) return problem("conflict", conflictFeedback(round, task.mainBranch, conflicts, true));
     for (const [phase, commands] of [["hooks", config.hooks.after_code], ["gates", config.gates]] as const) {
       for (const argv of commands) {
         steps.status(`round ${round}: ${phase} ${argv.join(" ")}`);
@@ -150,10 +149,7 @@ export async function runRound(snapshot: Snapshot, steps: PipelineSteps): Promis
     // Nothing differs from the diff base, whatever opened the round: nothing to review, approve or merge.
     if (diff.paths.length === 0) return end("done", "no_changes");
     const touched = protectedPaths(diff.paths, config.protected);
-    if (touched.length > 0) {
-      // In the user's checkout a protected path may hold the user's own edit: no model is asked to restore it.
-      return task.worktree ? problem("protected", protectedFeedback(round, touched)) : end("blocked", `protected: ${touched.join(", ")}`);
-    }
+    if (touched.length > 0) return problem("protected", protectedFeedback(round, touched));
 
     if (task.settings.review) {
       steps.status(`round ${round}: review`);

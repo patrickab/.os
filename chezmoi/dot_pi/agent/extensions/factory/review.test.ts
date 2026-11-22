@@ -86,11 +86,9 @@ describe("runReview", () => {
     title: "Fix the cart",
     request: "The total is off by one.",
     settings: { branch: "main", merge: "auto", maxRounds: 3, review: true, models: {} },
-    worktree: false,
-    branch: "main",
+    branch: "task",
     mainBranch: "main",
     baseSha: "abc",
-    baseTree: "tree",
   };
   const blocker: Finding = { file: "src/cart.js", line: 5, severity: "blocker", text: "off by one" };
   const child = (overrides: Partial<CommandResult> = {}): CommandResult => ({
@@ -113,7 +111,7 @@ describe("runReview", () => {
       round: 2,
       task,
       followUps,
-      diff: { base: "tree", tree: "now", paths: ["src/cart.js"], patch },
+      diff: { base: "tree", paths: ["src/cart.js"], patch },
       model: "anthropic/claude-haiku-5-5",
       rolePrompt: "Be strict.",
       reviewsDir,

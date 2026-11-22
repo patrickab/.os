@@ -8,12 +8,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PROTECTED, protectedPaths, type FactoryConfig } from "./config.ts";
-import { abortLeftoverRebase, diffBase, taskDiff, taskGit, upstreamMoved } from "./git.ts";
+import { abortLeftoverRebase, taskBase, taskDiff, taskGit } from "./git.ts";
 import { MERGE_ATTEMPTS, mergeTask, rebaseWorktree, type MergeInput } from "./merge.ts";
 import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import { runRound, type PipelineSteps } from "./pipeline.ts";
 import { CommandRunner, type Exec } from "./run.ts";
-import { upstreamRef, type Settings, type Snapshot, type Task } from "./state.ts";
+import type { Settings, Snapshot, Task } from "./state.ts";
 
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
 process.env.GIT_CONFIG_SYSTEM = "/dev/null";
@@ -48,7 +48,7 @@ beforeEach(() => {
   gitIn(repo, "commit", "--quiet", "-m", "base");
 });
 
-/** A linked worktree of `repo` on a new branch, as a worktree task gets one. */
+/** A linked worktree of `repo` on a new branch, as a task gets one. */
 function addWorktree(branch: string): string {
   const path = join(scratch, `wt-${counter}-${branch}`);
   gitIn(repo, "worktree", "add", "--quiet", "-b", branch, path);
@@ -60,7 +60,7 @@ async function taskIn(root: string, title = "Task title"): Promise<Task> {
 }
 
 function input(root: string, task: Task, config: FactoryConfig, round = 1): MergeInput {
-  return { exec: runner.run, cleanup: runner.cleanup, root, round, task, config, base: task.baseTree ?? task.baseSha, checkpoint: null, intent: () => undefined };
+  return { exec: runner.run, cleanup: runner.cleanup, root, round, task, config, intent: () => undefined };
 }
 
 describe("CommandRunner", () => {
@@ -141,54 +141,43 @@ describe("CommandRunner", () => {
 });
 
 describe("taskGit and taskDiff", () => {
-  test("a current-checkout task is its own main branch", async () => {
-    expect(await taskGit(runner.run, repo, "elsewhere")).toEqual({ worktree: false, branch: "main", mainBranch: "main", baseSha: gitIn(repo, "rev-parse", "HEAD"), baseTree: gitIn(repo, "rev-parse", "HEAD^{tree}") });
-  });
-
-  test("the base tree of a current-checkout task is its working tree, and taking it leaves index and files alone", async () => {
-    writeFileSync(join(repo, "README.md"), "user edit\n");
-    writeFileSync(join(repo, "notes.txt"), "user notes\n");
-    writeFileSync(join(repo, "staged.txt"), "user staged\n");
-    gitIn(repo, "add", "staged.txt");
-    const { baseTree } = await taskGit(runner.run, repo, "main");
-    expect(gitIn(repo, "ls-tree", "-r", "--name-only", baseTree!)).toBe("README.md\nfactory.yaml\nnotes.txt\nstaged.txt");
-    expect(gitIn(repo, "show", `${baseTree}:README.md`)).toBe("user edit");
-    expect(gitIn(repo, "status", "--porcelain")).toBe("M README.md\nA  staged.txt\n?? notes.txt");
-  });
-
-  test("a linked worktree is a worktree task whose main branch is the target branch, which must exist", async () => {
+  test("a task is a linked worktree on its own branch, and the branch it merges into must exist", async () => {
     gitIn(repo, "branch", "release");
     const worktree = addWorktree("task-a");
-    expect(await taskGit(runner.run, worktree, "release")).toEqual({ worktree: true, branch: "task-a", mainBranch: "release", baseSha: gitIn(repo, "rev-parse", "HEAD"), baseTree: null });
-    await expect(taskGit(runner.run, worktree, "nowhere")).rejects.toThrow("the target branch nowhere does not exist");
+    expect(await taskGit(runner.run, worktree, "release")).toEqual({ branch: "task-a", mainBranch: "release", baseSha: gitIn(repo, "rev-parse", "HEAD") });
+    await expect(taskGit(runner.run, worktree, "nowhere")).rejects.toThrow("the branch nowhere does not exist");
+    await expect(taskGit(runner.run, worktree, "task-a")).rejects.toThrow("a task works on a branch of its own");
   });
 
-  test("refuses a directory that is not the root of a checkout", async () => {
+  test("refuses the main checkout and a directory that is not the root of a checkout", async () => {
+    await expect(taskGit(runner.run, repo, "main")).rejects.toThrow("is the repository's main checkout");
     mkdirSync(join(repo, "sub"));
     await expect(taskGit(runner.run, join(repo, "sub"), "main")).rejects.toThrow("is not the root of its git checkout");
     await expect(taskGit(runner.run, scratch, "main")).rejects.toThrow("git rev-parse");
   });
 
   test("the diff holds tracked changes and untracked files, and leaves the index alone", async () => {
-    const task = await taskIn(repo);
-    writeFileSync(join(repo, "README.md"), "readme changed\n");
-    writeFileSync(join(repo, "new.txt"), "brand new\n");
-    const diff = await taskDiff(runner.run, repo, await diffBase(runner.run, repo, task, null));
-    expect(diff.base).toBe(task.baseTree!);
+    const worktree = addWorktree("task-d");
+    const task = await taskIn(worktree);
+    writeFileSync(join(worktree, "README.md"), "readme changed\n");
+    writeFileSync(join(worktree, "new.txt"), "brand new\n");
+    const diff = await taskDiff(runner.run, worktree, await taskBase(runner.run, worktree, task));
+    expect(diff.base).toBe(task.baseSha);
     expect(diff.paths.sort()).toEqual(["README.md", "new.txt"]);
     expect(diff.patch).toContain("+readme changed");
     expect(diff.patch).toContain("+brand new");
-    expect(gitIn(repo, "status", "--porcelain")).toBe("M README.md\n?? new.txt");
+    expect(gitIn(worktree, "status", "--porcelain")).toBe("M README.md\n?? new.txt");
   });
 
   test("the patch puts source before lockfiles", async () => {
-    const task = await taskIn(repo);
-    mkdirSync(join(repo, "zz"));
-    writeFileSync(join(repo, "zz", "source.ts"), "export const answer = 42;\n");
-    writeFileSync(join(repo, "bun.lock"), "lock body\n");
-    mkdirSync(join(repo, "app"));
-    writeFileSync(join(repo, "app", "package-lock.json"), "{}\n");
-    const diff = await taskDiff(runner.run, repo, task.baseTree!);
+    const worktree = addWorktree("task-l");
+    const task = await taskIn(worktree);
+    mkdirSync(join(worktree, "zz"));
+    writeFileSync(join(worktree, "zz", "source.ts"), "export const answer = 42;\n");
+    writeFileSync(join(worktree, "bun.lock"), "lock body\n");
+    mkdirSync(join(worktree, "app"));
+    writeFileSync(join(worktree, "app", "package-lock.json"), "{}\n");
+    const diff = await taskDiff(runner.run, worktree, task.baseSha);
     expect(diff.paths).toEqual(["app/package-lock.json", "bun.lock", "zz/source.ts"]);
     const at = (text: string) => diff.patch.indexOf(text);
     expect(at("b/zz/source.ts")).toBeGreaterThanOrEqual(0);
@@ -197,99 +186,21 @@ describe("taskGit and taskDiff", () => {
     expect(diff.patch.endsWith("+lock body\n")).toBe(true);
   });
 
-  test("a worktree task's diff base follows a rebase onto the moved main branch", async () => {
+  test("the diff base follows a rebase onto the moved target branch", async () => {
     const worktree = addWorktree("task-b");
     const task = await taskIn(worktree);
     writeFileSync(join(repo, "other.txt"), "someone else\n");
     gitIn(repo, "add", "-A");
     gitIn(repo, "commit", "--quiet", "-m", "other task");
     writeFileSync(join(worktree, "mine.txt"), "mine\n");
-    expect(await diffBase(runner.run, worktree, task, null)).toBe(task.baseSha);
+    expect(await taskBase(runner.run, worktree, task)).toBe(task.baseSha);
     gitIn(worktree, "rebase", "--quiet", "--autostash", "main");
-    const diff = await taskDiff(runner.run, worktree, await diffBase(runner.run, worktree, task, null));
+    const diff = await taskDiff(runner.run, worktree, await taskBase(runner.run, worktree, task));
     expect(diff.paths).toEqual(["mine.txt"]);
   });
 });
 
-describe("a worktree task with its own source branch", () => {
-  /**
-   * `feature` off main with a commit of its own that touches the protected `factory.yaml`, then a commit on main, and
-   * the task's worktree off `feature`, as gigachad makes it for source `feature` and target `main`.
-   */
-  async function sourceTask(): Promise<{ worktree: string; task: Task }> {
-    gitIn(repo, "branch", "feature");
-    gitIn(repo, "checkout", "--quiet", "feature");
-    writeFileSync(join(repo, "feature.txt"), "feature\n");
-    writeFileSync(join(repo, "factory.yaml"), "gates: []\nprotected: []\n");
-    gitIn(repo, "add", "-A");
-    gitIn(repo, "commit", "--quiet", "-m", "feature work");
-    gitIn(repo, "checkout", "--quiet", "main");
-    writeFileSync(join(repo, "other.txt"), "someone else\n");
-    gitIn(repo, "add", "-A");
-    gitIn(repo, "commit", "--quiet", "-m", "other task");
-    const worktree = join(scratch, `wt-${counter}-source`);
-    gitIn(repo, "worktree", "add", "--quiet", "-b", "task-s", worktree, "feature");
-    const task: Task = { title: "Task title", request: "do it", settings: { ...settings, sourceBranch: "feature" }, ...(await taskGit(runner.run, worktree, "main")) };
-    return { worktree, task };
-  }
-
-  const pathsOf = async (worktree: string, task: Task) => (await taskDiff(runner.run, worktree, await diffBase(runner.run, worktree, task, null))).paths;
-
-  test("the source's commits are never the task's change: not before the rebase, not after it, and no change is none", async () => {
-    const { worktree, task } = await sourceTask();
-    expect(await pathsOf(worktree, task)).toEqual([]);
-    writeFileSync(join(worktree, "mine.txt"), "mine\n");
-    expect(await pathsOf(worktree, task)).toEqual(["mine.txt"]);
-
-    expect(await rebaseWorktree(runner.run, runner.cleanup, worktree, task, DEFAULT_PROTECTED)).toBeNull();
-
-    const upstream = gitIn(repo, "rev-parse", upstreamRef(task, "base"));
-    expect(gitIn(repo, "rev-list", "--parents", "-n", "1", upstream).split(" ").slice(1)).toEqual([gitIn(repo, "rev-parse", "main"), gitIn(repo, "rev-parse", "feature")]);
-    expect(gitIn(worktree, "rev-parse", "HEAD^")).toBe(upstream);
-    expect(existsSync(join(worktree, "other.txt"))).toBe(true);
-    expect(await pathsOf(worktree, task)).toEqual(["mine.txt"]);
-    expect(await upstreamMoved(runner.run, worktree, task)).toBe(false);
-
-    // A second rebase with nothing moved keeps the upstream, and a source that moved is taken in.
-    expect(await rebaseWorktree(runner.run, runner.cleanup, worktree, task, DEFAULT_PROTECTED)).toBeNull();
-    expect(gitIn(repo, "rev-parse", upstreamRef(task, "base"))).toBe(upstream);
-    gitIn(repo, "checkout", "--quiet", "feature");
-    writeFileSync(join(repo, "feature2.txt"), "more\n");
-    gitIn(repo, "add", "-A");
-    gitIn(repo, "commit", "--quiet", "-m", "more feature work");
-    gitIn(repo, "checkout", "--quiet", "main");
-    expect(await upstreamMoved(runner.run, worktree, task)).toBe(true);
-    expect(await rebaseWorktree(runner.run, runner.cleanup, worktree, task, DEFAULT_PROTECTED)).toBeNull();
-    expect(existsSync(join(worktree, "feature2.txt"))).toBe(true);
-    expect(await pathsOf(worktree, task)).toEqual(["mine.txt"]);
-  });
-
-  test("the merge brings the source into the target as a merge, with the task's change as its own commit on top", async () => {
-    const { worktree, task } = await sourceTask();
-    writeFileSync(join(worktree, "mine.txt"), "mine\n");
-
-    const outcome = await mergeTask(input(worktree, task, noGates));
-
-    expect(outcome.merge).toMatchObject({ ok: true, kind: "merge", commit: gitIn(repo, "rev-parse", "main") });
-    expect(gitIn(repo, "log", "--first-parent", "--format=%s", "main")).toBe("Task title\nMerge branch 'feature' into main\nother task\nbase");
-    expect(gitIn(repo, "diff", "--name-only", "main^", "main")).toBe("mine.txt");
-    for (const file of ["feature.txt", "other.txt", "mine.txt"]) expect(existsSync(join(repo, file))).toBe(true);
-  });
-
-  test("a source that does not merge cleanly into the target fails the rebase with the conflicting files", async () => {
-    const { worktree, task } = await sourceTask();
-    writeFileSync(join(repo, "feature.txt"), "main's own\n");
-    gitIn(repo, "add", "-A");
-    gitIn(repo, "commit", "--quiet", "-m", "clash");
-
-    await expect(rebaseWorktree(runner.run, runner.cleanup, worktree, task, DEFAULT_PROTECTED)).rejects.toThrow(
-      "the source branch feature does not merge cleanly into main: feature.txt",
-    );
-    expect(gitIn(worktree, "rev-parse", "HEAD")).toBe(gitIn(repo, "rev-parse", "feature"));
-  });
-});
-
-describe("mergeTask, worktree task", () => {
+describe("mergeTask", () => {
   test("commits with the title, rebases onto main, runs the gates again and fast-forwards the primary", async () => {
     const worktree = addWorktree("task-c");
     const task = await taskIn(worktree, "Add feature");
@@ -301,7 +212,7 @@ describe("mergeTask, worktree task", () => {
 
     const outcome = await mergeTask(input(worktree, task, config, 2));
 
-    expect(outcome.merge).toEqual({ ok: true, kind: "merge", commit: gitIn(repo, "rev-parse", "HEAD"), error: null, depsSynced: false, tree: null, mixed: [] });
+    expect(outcome.merge).toEqual({ ok: true, commit: gitIn(repo, "rev-parse", "HEAD"), error: null, depsSynced: false });
     expect(outcome.gates.map((gate) => [gate.round, gate.phase, gate.argv.join(" "), gate.exitCode])).toEqual([
       [2, "merge_gates", "test -f other.txt", 0],
       [2, "merge_gates", "test -f feature.txt", 0],
@@ -352,7 +263,7 @@ describe("mergeTask, worktree task", () => {
 
     const outcome = await mergeTask(input(worktree, task, config, 1));
 
-    expect(outcome.merge).toMatchObject({ ok: true, kind: "merge", commit: gitIn(repo, "rev-parse", "main") });
+    expect(outcome.merge).toMatchObject({ ok: true, commit: gitIn(repo, "rev-parse", "main") });
     expect(outcome.gates.map((gate) => gate.phase)).toEqual(["merge_gates", "merge_gates"]);
     expect(gitIn(repo, "log", "--format=%s")).toBe(`${task.title}\nraced\nearlier\nbase`);
   });
@@ -367,7 +278,7 @@ describe("mergeTask, worktree task", () => {
 
     const outcome = await mergeTask(input(worktree, task, config, 1));
 
-    expect(outcome.merge).toMatchObject({ ok: false, kind: "merge", commit: null, depsSynced: false });
+    expect(outcome.merge).toMatchObject({ ok: false, commit: null, depsSynced: false });
     expect(outcome.merge.error).toContain("update of main refused: main moved past the task's base");
     expect(outcome.gates).toHaveLength(MERGE_ATTEMPTS);
     expect(gitIn(repo, "log", "--format=%s")).toBe(`${"raced\n".repeat(MERGE_ATTEMPTS)}earlier\nbase`);
@@ -410,7 +321,7 @@ describe("mergeTask, worktree task", () => {
 
     const outcome = await mergeTask(input(worktree, task, config));
 
-    expect(outcome.merge).toMatchObject({ ok: true, kind: "merge", error: null, depsSynced: false });
+    expect(outcome.merge).toMatchObject({ ok: true, error: null, depsSynced: false });
     expect(gitIn(repo, "rev-parse", "main")).toBe(gitIn(worktree, "rev-parse", "HEAD"));
     expect(gitIn(repo, "log", "--format=%s", "main")).toBe("Task title\nmain moved\nbase");
     expect(gitIn(repo, "symbolic-ref", "--short", "HEAD")).toBe("elsewhere");
@@ -451,7 +362,7 @@ describe("mergeTask, worktree task", () => {
 
     const outcome = await mergeTask(input(worktree, task, noGates));
 
-    expect(outcome.merge).toMatchObject({ ok: false, kind: "merge", commit: null });
+    expect(outcome.merge).toMatchObject({ ok: false, commit: null });
     expect(outcome.merge.error).toContain("update of main refused");
     expect(outcome.merge.error).toContain("README.md");
     expect(readFileSync(join(other, "README.md"), "utf8")).toBe("user work in the other worktree\n");
@@ -481,7 +392,7 @@ describe("mergeTask, worktree task", () => {
   });
 });
 
-describe("mergeTask, worktree task: what a merge must not get wrong", () => {
+describe("mergeTask: what a merge must not get wrong", () => {
   test("skips the merge gates when the rebase did not move HEAD", async () => {
     const worktree = addWorktree("task-k");
     const task = await taskIn(worktree);
@@ -569,7 +480,7 @@ describe("mergeTask, worktree task: what a merge must not get wrong", () => {
     await holder.exited;
     expect(Date.now() - started).toBeLessThan(4000);
     expect(outcome.merge).toMatchObject({ ok: false, error: "cancelled while waiting for the merge lock" });
-    expect(intents).toEqual([{ kind: "merge", commit: gitIn(worktree, "rev-parse", "HEAD"), before: task.baseSha }]);
+    expect(intents).toEqual([{ commit: gitIn(worktree, "rev-parse", "HEAD"), before: task.baseSha }]);
     await Bun.sleep(300);
     expect(gitIn(repo, "rev-parse", "main")).toBe(task.baseSha);
   });
@@ -634,155 +545,12 @@ describe("mergeTask, worktree task: what a merge must not get wrong", () => {
   });
 });
 
-describe("mergeTask, current-checkout task in a tree the user was working in", () => {
-  /** The user's work in progress: an edit to a tracked file, to `factory.yaml`, an untracked file and a staged one. */
-  function userEdits(): Record<string, string> {
-    const edits = { "README.md": "user readme\n", "factory.yaml": "gates: [[user, tuning]]\n", "notes.txt": "user notes\n", "staged.txt": "user staged\n" };
-    for (const [path, content] of Object.entries(edits)) writeFileSync(join(repo, path), content);
-    gitIn(repo, "add", "staged.txt");
-    return edits;
-  }
-  const userStatus = "M README.md\n M factory.yaml\nA  staged.txt\n?? notes.txt";
-
-  test("the commit holds only the task's file, the user's edits stay uncommitted, staged as they were and byte-identical", async () => {
-    const edits = userEdits();
-    const task = await taskIn(repo, "Add task file");
-    writeFileSync(join(repo, "task.txt"), "task\n");
-    expect((await taskDiff(runner.run, repo, task.baseTree!)).paths).toEqual(["task.txt"]);
-
-    const outcome = await mergeTask(input(repo, task, noGates));
-
-    expect(outcome.merge).toMatchObject({ ok: true, kind: "commit", commit: gitIn(repo, "rev-parse", "HEAD") });
-    expect(gitIn(repo, "show", "--format=%s", "--name-only", "HEAD")).toBe("Add task file\n\ntask.txt");
-    expect(gitIn(repo, "status", "--porcelain")).toBe(userStatus);
-    for (const [path, content] of Object.entries(edits)) expect(readFileSync(join(repo, path), "utf8")).toBe(content);
-  });
-
-  test("after the commit a message round's diff holds only the new change", async () => {
-    userEdits();
-    const task = await taskIn(repo);
-    writeFileSync(join(repo, "task.txt"), "task\n");
-    const { merge } = await mergeTask(input(repo, task, noGates));
-    expect(merge.tree).not.toBe(gitIn(repo, "rev-parse", `${merge.commit}^{tree}`));
-    expect(gitIn(repo, "ls-tree", "-r", "--name-only", merge.tree!)).toBe("README.md\nfactory.yaml\nnotes.txt\nstaged.txt\ntask.txt");
-
-    writeFileSync(join(repo, "task.txt"), "task, second round\n");
-    const diff = await taskDiff(runner.run, repo, await diffBase(runner.run, repo, task, merge.tree));
-    expect(diff.paths).toEqual(["task.txt"]);
-    expect(diff.patch).toContain("+task, second round");
-    expect(protectedPaths(diff.paths, noGates.protected)).toEqual([]);
-
-    const second = await mergeTask({ ...input(repo, task, noGates), base: merge.tree! });
-    expect(gitIn(repo, "show", "--format=", "--name-only", second.merge.commit!)).toBe("task.txt");
-    expect(gitIn(repo, "status", "--porcelain")).toBe(userStatus);
-  });
-
-  test("a file of the user that the task deleted, and one it changed, are committed as the task left them", async () => {
-    writeFileSync(join(repo, "notes.txt"), "user notes\n");
-    const task = await taskIn(repo);
-    rmSync(join(repo, "notes.txt"));
-    rmSync(join(repo, "README.md"));
-    const outcome = await mergeTask(input(repo, task, noGates));
-    expect(outcome.merge.ok).toBe(true);
-    expect(gitIn(repo, "show", "--format=", "--name-status", "HEAD")).toBe("D\tREADME.md");
-    expect(gitIn(repo, "status", "--porcelain")).toBe("");
-  });
-
-  test("a cancel that arrives during the commit still leaves the user's index in line with it", async () => {
-    const task = await taskIn(repo);
-    writeFileSync(join(repo, "README.md"), "task readme\n");
-    writeFileSync(join(repo, "task.txt"), "task\n");
-    const own = new CommandRunner();
-    const exec: Exec = async (argv, options) => {
-      const result = await own.run(argv, options);
-      if (argv[1] === "commit-tree") own.cancel();
-      return result;
-    };
-    const outcome = await mergeTask({ ...input(repo, task, noGates), exec, cleanup: own.cleanup });
-    expect(outcome.merge).toMatchObject({ ok: true, commit: gitIn(repo, "rev-parse", "HEAD") });
-    expect(gitIn(repo, "log", "--format=%s")).toBe("Task title\nbase");
-    expect(gitIn(repo, "status", "--porcelain")).toBe("");
-  });
-
-  test("a HEAD that moves while the commit is built fails the merge: the other commit is not reverted", async () => {
-    const task = await taskIn(repo);
-    writeFileSync(join(repo, "task.txt"), "task\n");
-    const exec: Exec = async (argv, options) => {
-      // Someone else commits right before the task's commit object is written.
-      if (argv[1] === "commit-tree") gitIn(repo, "commit", "--quiet", "--allow-empty", "-m", "other");
-      return runner.run(argv, options);
-    };
-    const intents: unknown[] = [];
-    const outcome = await mergeTask({ ...input(repo, task, noGates), exec, intent: (data) => intents.push(data) });
-    expect(outcome.merge).toMatchObject({ ok: false, kind: "commit", commit: null });
-    expect(outcome.merge.error).toStartWith(`HEAD moved away from ${task.baseSha}`);
-    expect(intents).toMatchObject([{ kind: "commit", before: task.baseSha }]);
-    expect(gitIn(repo, "log", "--format=%s")).toBe("other\nbase");
-    expect(gitIn(repo, "status", "--porcelain")).toBe("?? task.txt");
-  });
-
-  test("a task path that changed since the round's tree fails the merge, a path the user also had changed is reported as mixed", async () => {
-    writeFileSync(join(repo, "README.md"), "user readme\n");
-    const task = await taskIn(repo);
-    writeFileSync(join(repo, "README.md"), "user readme\ntask line\n");
-    writeFileSync(join(repo, "task.txt"), "task\n");
-    const tree = (await taskDiff(runner.run, repo, task.baseTree!)).tree;
-    writeFileSync(join(repo, "task.txt"), "the user's later edit\n");
-    const changed = await mergeTask({ ...input(repo, task, noGates), checkpoint: { tree, head: task.baseSha } });
-    expect(changed.merge.error).toBe("changed since the round ended, by someone else: task.txt");
-    expect(gitIn(repo, "log", "--format=%s")).toBe("base");
-
-    writeFileSync(join(repo, "task.txt"), "task\n");
-    const committed = await mergeTask({ ...input(repo, task, noGates), checkpoint: { tree, head: task.baseSha } });
-    expect(committed.merge).toMatchObject({ ok: true, mixed: ["README.md"] });
-  });
-
-  test("refuses to commit on another branch or into a merge in progress", async () => {
-    const task = await taskIn(repo);
-    writeFileSync(join(repo, "task.txt"), "task\n");
-    gitIn(repo, "switch", "--quiet", "-c", "elsewhere");
-    const switched = await mergeTask(input(repo, task, noGates));
-    expect(switched.merge).toMatchObject({ ok: false, kind: "commit", commit: null, error: "the task checkout is on elsewhere, not on main" });
-    gitIn(repo, "switch", "--quiet", "main");
-    writeFileSync(gitIn(repo, "rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"), `${task.baseSha}\n`);
-    const merging = await mergeTask(input(repo, task, noGates));
-    expect(merging.merge.error).toBe("a git operation is in progress in the task checkout (MERGE_HEAD)");
-    expect(gitIn(repo, "log", "--all", "--format=%s")).toBe("base");
-    expect(gitIn(repo, "status", "--porcelain")).toBe("?? task.txt");
-  });
-});
-
-describe("mergeTask, current-checkout task", () => {
-  test("commits everything but protected paths to the current branch", async () => {
-    const task = await taskIn(repo, "Checkout change");
-    writeFileSync(join(repo, "README.md"), "readme changed\n");
-    writeFileSync(join(repo, "new.txt"), "new\n");
-    writeFileSync(join(repo, "factory.yaml"), "gates: [[true]]\n");
-    mkdirSync(join(repo, ".factory", "agents"), { recursive: true });
-    writeFileSync(join(repo, ".factory", "agents", "coder.md"), "be nice\n");
-
-    const outcome = await mergeTask(input(repo, task, noGates));
-
-    expect(outcome).toEqual({ gates: [], merge: { ok: true, kind: "commit", commit: gitIn(repo, "rev-parse", "HEAD"), error: null, depsSynced: false, tree: expect.any(String), mixed: [] }, conflicts: null, failedGate: null });
-    expect(gitIn(repo, "log", "--format=%s")).toBe("Checkout change\nbase");
-    expect(gitIn(repo, "show", "--format=", "--name-only", "HEAD").split("\n").sort()).toEqual(["README.md", "new.txt"]);
-    expect(gitIn(repo, "status", "--porcelain")).toBe("M factory.yaml\n?? .factory/");
-  });
-
-  test("nothing to commit is a merge without a new commit", async () => {
-    const task = await taskIn(repo);
-    const outcome = await mergeTask(input(repo, task, noGates));
-    expect(outcome.merge).toMatchObject({ ok: true, kind: "commit", commit: task.baseSha });
-    expect(gitIn(repo, "log", "--format=%s")).toBe("base");
-  });
-});
-
 test("a round whose diff touches a protected path is refused before any merge", async () => {
   const worktree = addWorktree("task-j");
   const task = await taskIn(worktree);
   writeFileSync(join(worktree, "feature.txt"), "feature\n");
   writeFileSync(join(worktree, "factory.yaml"), "gates: [[true]]\n");
-  const snapshot: Snapshot = { task, state: "running", round: 1, runFirstRound: 1, reason: "start", mergedBase: null, head: null, roundTree: null, mergeIntent: null, mergeError: null };
+  const snapshot: Snapshot = { task, state: "running", round: 1, runFirstRound: 1, reason: "start", mergeIntent: null, mergeError: null };
   let merges = 0;
   const steps: PipelineSteps = {
     status: () => undefined,
@@ -790,7 +558,7 @@ test("a round whose diff touches a protected path is refused before any merge", 
     pendingMessages: () => false,
     config: () => noGates,
     runCommand: (argv) => runner.run(argv, { cwd: worktree }),
-    diff: async () => taskDiff(runner.run, worktree, await diffBase(runner.run, worktree, task, null)),
+    diff: async () => taskDiff(runner.run, worktree, await taskBase(runner.run, worktree, task)),
     review: async () => {
       throw new Error("review is off");
     },

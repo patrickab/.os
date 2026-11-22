@@ -1,35 +1,27 @@
 /**
  * The merge step of a passed task.
  *
- * - Consumes the task, the repo's `FactoryConfig`, the task's diff base and two `Exec`s: `exec` is killed by a cancel,
- *   `cleanup` is not
- * - Worktree task: commit, rebase onto the main branch (the target branch), gates again (`merge_gates`, skipped when
- *   the rebase moved nothing), then under the merge lock (a cancel ends the wait for it, never the update): a target
- *   checked out in a worktree (the primary or another one) is fast-forwarded there, and `hooks.after_merge` run when
- *   that is the primary and the merge changed a lockfile; a target checked out nowhere is moved with a
- *   compare-and-swap `update-ref`, no hooks. A
- *   conflicting rebase is aborted and reported with its files (`MergeOutcome.conflicts`), not as a failure. A merge
+ * - Consumes the task, the repo's `FactoryConfig` and two `Exec`s: `exec` is killed by a cancel, `cleanup` is not
+ * - Commit, rebase onto the target branch, gates again (`merge_gates`, skipped when the rebase moved nothing), then
+ *   under the merge lock (a cancel ends the wait for it, never the update): a target checked out in a worktree (the
+ *   primary or another one) is fast-forwarded there, and `hooks.after_merge` run when that is the primary and the
+ *   merge changed a lockfile; a target checked out nowhere is moved with a compare-and-swap `update-ref`, no hooks
+ * - A conflicting rebase is aborted and reported with its files (`MergeOutcome.conflicts`), not as a failure. A merge
  *   gate that fails on the rebased branch is reported with its command (`MergeOutcome.failedGate`): the rebase stays,
  *   so the coder fixes the change on top of the target branch
  * - Provides `rebaseWorktree`, which a run that opens uses to bring the task branch up to date the same way. It
- *   squashes the task branch onto its base first (`taskBase`): the rebase replays one commit, the task's net change.
- *   A task with its own source branch rebases onto its upstream (`nextUpstream`, the merge of target and source), so
- *   the source's commits stay out of its change and reach the target with the merge
+ *   squashes the task branch onto its base first (`taskBase`): the rebase replays one commit, the task's net change
  * - The factory's own commits run no commit hooks and are not signed (`--no-verify --no-gpg-sign`)
- * - Current-checkout task: commit the paths in which the round's tree differs from the task's base onto the HEAD
- *   the task builds on, compare-and-swap, no commit hooks. What the user had in the tree or staged before the task
- *   stays as it was. A task path that changed since the round ended, or a HEAD that moved, fails the merge
  * - Reports the step that cannot be undone (`intent`) right before it, so a resume can tell whether it happened
  * - Provides `mergeTask`: the `factory-merge` data and the `factory-gate` data of the commands it ran. It never
  *   throws, a failure is `ok: false` with the reason
  */
-import { writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { protectedPaths, type FactoryConfig } from "./config.ts";
-import { addAllArgs, assertCheckoutReady, git, LOCKFILES, nextUpstream, nulList, primaryCheckout, rebaseInProgress, snapshotTree, stageTree, taskBase, upstreamMoved, withScratchIndex } from "./git.ts";
+import type { FactoryConfig } from "./config.ts";
+import { addAllArgs, assertCheckoutReady, git, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, targetMoved, taskBase } from "./git.ts";
 import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import type { CommandResult, Exec } from "./run.ts";
-import { gateData, hasOwnSource, passed, rebaseOnto, upstreamRef, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
+import { gateData, passed, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
 
 const ERROR_TAIL_CHARS = 1000;
 /** How long a merge waits for the merge lock, polling once a second. */
@@ -68,13 +60,6 @@ export interface MergeInput {
   round: number;
   task: Task;
   config: FactoryConfig;
-  /** Current-checkout task: the commit or tree its change is taken against (`diffBase`). */
-  base: string;
-  /**
-   * Current-checkout task: the working tree its round ended on and the HEAD it builds on (`Snapshot.roundTree`,
-   * `Snapshot.head`). Null for a task whose states predate them: then the tree and HEAD as they are now.
-   */
-  checkpoint: { tree: string; head: string } | null;
   /** Called with the intent right before the merge's irreversible step. */
   intent: (data: MergeIntentData) => void;
   /** Called with what the merge does next. */
@@ -93,26 +78,19 @@ export interface MergeOutcome {
 export type GateFailure = { argv: string[]; result: CommandResult };
 
 /**
- * Brings a worktree task's branch up to date: commits the worktree as `commitWorktree` does, squashes the branch onto
- * its base, then rebases it onto the main branch, or for a task with its own source onto its next upstream (the ref
- * `next`, which becomes `base` once the rebase is done). A conflicting rebase is aborted with `cleanup` and its
- * conflicting files returned, else null; `next` stays for the coder's rebase. Any other failure throws.
- * `--autostash` carries what the commit leaves out (protected paths) over the rebase.
+ * Brings the task branch up to date: commits the worktree as `commitWorktree` does, squashes the branch onto its base,
+ * then rebases it onto the target branch. A conflicting rebase is aborted with `cleanup` and its conflicting files
+ * returned, else null. Any other failure throws. `--autostash` carries what the commit leaves out (protected paths)
+ * over the rebase.
  */
 export async function rebaseWorktree(exec: Exec, cleanup: Exec, root: string, task: Task, protectedGlobs: string[]): Promise<string[] | null> {
   await commitWorktree(exec, root, task, protectedGlobs);
   await squashOntoBase(exec, root, task);
-  const onto = rebaseOnto(task);
-  if (hasOwnSource(task)) await git(exec, root, ["update-ref", onto, await nextUpstream(exec, root, task)]);
-  const rebase = await exec(["git", "rebase", "--autostash", onto], { cwd: root });
+  const rebase = await exec(["git", "rebase", "--autostash", `refs/heads/${task.mainBranch}`], { cwd: root });
   if (passed(rebase)) {
     // An autostash that did not apply cleanly leaves conflict markers, which the next commit would take.
     const unmerged = nulList(await git(exec, root, ["diff", "--name-only", "--diff-filter=U", "-z"]));
     if (unmerged.length > 0) throw new Error(`the autostash did not apply after the rebase onto ${task.mainBranch} (kept in git stash list): ${unmerged.join(", ")}`);
-    if (hasOwnSource(task)) {
-      await git(exec, root, ["update-ref", upstreamRef(task, "base"), onto]);
-      await git(exec, root, ["update-ref", "-d", onto]);
-    }
     return null;
   }
   const open = await rebaseInProgress(cleanup, root);
@@ -135,50 +113,10 @@ async function squashOntoBase(exec: Exec, root: string, task: Task): Promise<voi
 }
 
 /** 0 means nothing staged, 1 something. Any other exit is a git failure, never "nothing to commit". */
-async function hasStagedChanges(exec: Exec, root: string, env?: Record<string, string>): Promise<boolean> {
-  const staged = await exec(["git", "diff", "--cached", "--quiet"], { cwd: root, env });
+async function hasStagedChanges(exec: Exec, root: string): Promise<boolean> {
+  const staged = await exec(["git", "diff", "--cached", "--quiet"], { cwd: root });
   if (staged.killed || (staged.exitCode !== 0 && staged.exitCode !== 1)) throw new Error(`git diff --cached: ${staged.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
   return staged.exitCode === 1;
-}
-
-async function commitCheckout({ exec, cleanup, root, task, config, base, checkpoint, intent }: MergeInput): Promise<MergeData> {
-  await assertCheckoutReady(exec, root, task.branch);
-  return withScratchIndex(exec, root, async (env, dir) => {
-    const now = await stageTree(exec, root, env);
-    const tree = checkpoint?.tree ?? now;
-    const head = checkpoint?.head ?? (await git(exec, root, ["rev-parse", "HEAD"]));
-    const changed = async (from: string, to: string, only: string[] = ["."]) =>
-      nulList(await git(exec, root, ["--literal-pathspecs", "diff", "--no-renames", "--name-only", "-z", from, to, "--", ...only]));
-    // The task's paths are those in which the round's tree differs from the base. Of them, the commit takes what
-    // differs from HEAD.
-    const ofTask = new Set(await changed(base, tree));
-    const candidates = (await changed(head, tree)).filter((path) => ofTask.has(path));
-    const excluded = new Set(protectedPaths(candidates, config.protected));
-    const paths = candidates.filter((path) => !excluded.has(path));
-    const done = (commit: string, left: string, mixed: string[]): MergeData => ({ ok: true, kind: "commit", commit, error: null, depsSynced: false, tree: left, mixed });
-    if (paths.length === 0) return done(head, now, []);
-
-    const pathsFile = join(dir, "paths");
-    await writeFile(pathsFile, paths.join("\0"));
-    const since = await changed(tree, now, paths);
-    if (since.length > 0) throw new Error(`changed since the round ended, by someone else: ${since.join(", ")}`);
-    // Committed whole, though the user had uncommitted edits in them before the task.
-    const mixed = await changed(head, base, paths);
-    const stagePaths = (source: string) => ["--literal-pathspecs", "restore", "--staged", `--source=${source}`, `--pathspec-from-file=${pathsFile}`, "--pathspec-file-nul"];
-    // The commit is built in the scratch index: HEAD plus the task's paths. The user's index is not part of it.
-    await git(exec, root, ["read-tree", head], env);
-    await git(exec, root, stagePaths(tree), env);
-    const commitTree = await git(exec, root, ["write-tree"], env);
-    const commit = await git(exec, root, ["commit-tree", "--no-gpg-sign", commitTree, "-p", head, "-m", task.title]);
-    intent({ kind: "commit", commit, before: head });
-    // From here on a cancel stops nothing: the user's index still holds the old entries of the committed paths, which
-    // would read as staged reverts. The update fails when HEAD is no longer the commit the task builds on.
-    const moved = await cleanup(["git", "update-ref", "-m", `factory: ${task.title}`, "HEAD", commit, head], { cwd: root });
-    if (!passed(moved)) throw new Error(`HEAD moved away from ${head}, nothing was committed: ${moved.output.trim().slice(-ERROR_TAIL_CHARS)}`);
-    await git(cleanup, root, stagePaths(commit));
-    // What the commit left in the working tree (the user's edits, protected paths) is the base of later rounds.
-    return done(commit, await snapshotTree(cleanup, root), mixed);
-  });
 }
 
 /** Commits everything in the task worktree but protected paths with the task title. Returns HEAD, also when there was nothing to commit. */
@@ -196,7 +134,7 @@ function tryMoveTarget(cleanup: Exec, lock: string, root: string, primary: strin
 async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<MergeData | string[] | GateFailure> {
   const { exec, cleanup, root, round, task, config, intent } = input;
   const status = input.status ?? (() => undefined);
-  const result = (ok: boolean, commit: string | null, error: string | null, depsSynced: boolean): MergeData => ({ ok, kind: "merge", commit, error, depsSynced, tree: null, mixed: [] });
+  const result = (ok: boolean, commit: string | null, error: string | null, depsSynced: boolean): MergeData => ({ ok, commit, error, depsSynced });
   const fail = (error: string) => result(false, null, error, false);
   const tail = (output: string) => output.trim().slice(-ERROR_TAIL_CHARS);
 
@@ -209,7 +147,6 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
   await commitWorktree(exec, root, task, config.protected);
   let ontoBefore = await taskBase(exec, root, task);
   const sameGates = JSON.stringify(config.merge_gates) === JSON.stringify(config.gates);
-  const targetMoved = () => upstreamMoved(exec, root, task);
 
   // Rebased before it queues: a conflict goes to the coder at once, without a place in the queue.
   status(`rebase onto ${task.mainBranch}`);
@@ -221,7 +158,7 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
       status(`queued for merge, ${ahead} ahead`);
       if ((await exec(["sleep", String(QUEUE_POLL_MS / 1000)], { cwd: root })).killed) return fail("cancelled while queued for merge");
       // A merge ahead landed: rebase onto it now, a conflict leaves the queue and goes to the coder.
-      if (!(await targetMoved())) continue;
+      if (!(await targetMoved(exec, root, task))) continue;
       status(`rebase onto ${task.mainBranch}, a merge ahead landed`);
       const moved = await rebaseWorktree(exec, cleanup, root, task, config.protected);
       if (moved) return moved;
@@ -255,7 +192,7 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
       status("fast-forward");
       await assertCheckoutReady(exec, root, task.branch);
       const target = await git(exec, primary, ["rev-parse", `refs/heads/${task.mainBranch}`]);
-      intent({ kind: "merge", commit: head, before: target });
+      intent({ commit: head, before: target });
       // Each try takes the lock or gives up at once. The update is not killed by a cancel: a fast-forward cut in half
       // leaves the target's checkout partly updated. The wait between tries is, and a lock holder that hangs ends in a timeout.
       const deadline = Date.now() + LOCK_WAIT_MS;
@@ -287,16 +224,14 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
       if (!passed(hook)) return result(true, commit, `after_merge failed: ${argv.join(" ")}: ${tail(hook.output)}`, false);
     }
     return result(true, commit, null, true);
-
   }
 }
 
 export async function mergeTask(input: MergeInput): Promise<MergeOutcome> {
-  const kind = input.task.worktree ? "merge" : "commit";
   const gates: GateData[] = [];
-  const failed = (error: string): MergeData => ({ ok: false, kind, commit: null, error, depsSynced: false, tree: null, mixed: [] });
+  const failed = (error: string): MergeData => ({ ok: false, commit: null, error, depsSynced: false });
   try {
-    const merge = input.task.worktree ? await mergeWorktree(input, gates) : await commitCheckout(input);
+    const merge = await mergeWorktree(input, gates);
     if (Array.isArray(merge)) return { gates, merge: failed(`rebase onto ${input.task.mainBranch} conflicts`), conflicts: merge, failedGate: null };
     if ("argv" in merge) return { gates, merge: failed(`merge gate failed: ${merge.argv.join(" ")}`), conflicts: null, failedGate: merge };
     return { gates, merge, conflicts: null, failedGate: null };
