@@ -7,6 +7,7 @@
  * - Provides the checks a merge needs before it writes: the checkout is on its branch with no git operation in
  *   progress (`assertCheckoutReady`). Tells a rebase in progress and its conflicting files (`rebaseInProgress`), and
  *   aborts one a killed merge left behind (`abortLeftoverRebase`)
+ * - Provides the added and removed lines per changed path (`diffFileCounts`)
  * - Provides where the task's own change starts (`taskBase`) and whether its target branch moved past it (`targetMoved`)
  * - Nothing here writes the checkout's own index or its files: staging goes through a scratch index
  */
@@ -164,7 +165,11 @@ export interface TaskDiff {
 
 /** The working tree of `root` against `base`, untracked files included. Files named in `lockfiles` go last in the patch. */
 export async function taskDiff(exec: Exec, root: string, base: string, lockfiles: readonly string[] = LOCKFILES): Promise<TaskDiff> {
-  const tree = await snapshotTree(exec, root);
+  return treeDiff(exec, root, base, await snapshotTree(exec, root), lockfiles);
+}
+
+/** `taskDiff` against the tree id `tree` (`snapshotTree`). */
+export async function treeDiff(exec: Exec, root: string, base: string, tree: string, lockfiles: readonly string[] = LOCKFILES): Promise<TaskDiff> {
   const paths = nulList(await git(exec, root, ["diff", "--no-renames", "--name-only", "-z", base, tree]));
   // Fixed prefixes and no external diff tool: the patch must not depend on the user's git config.
   const patchOf = async (pathspecs: string[]) => {
@@ -176,4 +181,20 @@ export async function taskDiff(exec: Exec, root: string, base: string, lockfiles
   const source = await patchOf([".", ...lockfiles.map((name) => `:(exclude,glob)**/${name}`)]);
   const locks = lockfiles.length === 0 ? "" : await patchOf(lockfiles.map((name) => `:(glob)**/${name}`));
   return { base, paths, patch: source + locks };
+}
+
+export interface FileCounts {
+  path: string;
+  /** Lines; 0 for a binary file. */
+  added: number;
+  removed: number;
+}
+
+/** Added and removed lines per changed path of `tree` against `base`, no renames. */
+export async function diffFileCounts(exec: Exec, root: string, base: string, tree: string): Promise<FileCounts[]> {
+  const fields = nulList(await git(exec, root, ["diff", "--no-renames", "--no-ext-diff", "--numstat", "-z", base, tree]));
+  return fields.map((field) => {
+    const [added = "", removed = "", ...path] = field.split("\t");
+    return { path: path.join("\t"), added: Number(added) || 0, removed: Number(removed) || 0 };
+  });
 }

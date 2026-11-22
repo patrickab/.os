@@ -1,12 +1,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultBranch, deleteTask, launchTask, liveRunners, startCommand } from "./launch.ts";
+import { defaultBranch, deleteTask, launchTask, LaunchRefusedError, liveRunners, runnerSpawn, startCommand, taskInboxPath, unmergedWork } from "./launch.ts";
 import { resolveSettings, saveSettings } from "./settings.ts";
 import { parseStartPayload } from "./state.ts";
-import { listTasks } from "./tasks.ts";
+import { listTasks, taskLogPath } from "./tasks.ts";
 
 const savedEnv = { ...process.env };
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
@@ -18,11 +18,34 @@ process.env.PI_CODING_AGENT_DIR = join(scratch, "agent");
 // A real `agent-worktree` that slipped through would write under `$HOME/git/worktrees`: keep that inside scratch too.
 process.env.HOME = scratch;
 
+/**
+ * `launchTask` starts a runner: a fake `pi` that exits before it answers stands first on every PATH of these tests, so
+ * no real Pi ever runs.
+ */
+const piBin = join(scratch, "pi-bin");
+mkdirSync(piBin);
+writeFileSync(join(piBin, "pi"), "#!/bin/sh\nexit 0\n");
+chmodSync(join(piBin, "pi"), 0o755);
+
 /** A PATH without any directory that holds `agent-worktree`: the plain `git worktree add` path. */
-const pathWithoutAgentWorktree = (savedEnv.PATH ?? "")
-  .split(":")
-  .filter((dir) => dir !== "" && !existsSync(join(dir, "agent-worktree")))
-  .join(":");
+const pathWithoutAgentWorktree = [
+  piBin,
+  ...(savedEnv.PATH ?? "").split(":").filter((dir) => dir !== "" && !existsSync(join(dir, "agent-worktree"))),
+].join(":");
+
+/** Waits until no runner a test started (its worktree is under `scratch`) is alive. */
+async function runnersEnded(): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (true) {
+    try {
+      execFileSync("pgrep", ["-f", `runner\\.ts .*${scratch}`]);
+    } catch {
+      return;
+    }
+    if (Date.now() > deadline) throw new Error("a runner did not end");
+    await Bun.sleep(50);
+  }
+}
 
 /**
  * A fake `agent-worktree` that puts worktrees under `<scratch>/fake-worktrees`, never under `~/git/worktrees`.
@@ -67,9 +90,10 @@ let caseCount = 0;
 beforeEach(() => {
   caseDir = join(scratch, `case-${++caseCount}`);
   mkdirSync(caseDir);
-  process.env.PATH = `${fakeBin}:${savedEnv.PATH}`;
+  process.env.PATH = `${piBin}:${fakeBin}:${savedEnv.PATH}`;
 });
-afterEach(() => {
+afterEach(async () => {
+  await runnersEnded();
   process.env.PATH = savedEnv.PATH;
   delete process.env.FAKE_AW_FAIL;
   rmSync(join(scratch, "agent"), { recursive: true, force: true });
@@ -139,7 +163,7 @@ describe("launchTask", () => {
     git(repo, "checkout", "--quiet", "main");
     await saveSettings(repo, { branch: "feature" });
 
-    const record = await launchTask({ repo, title: "Add a Greeting!", request: "say hi", spawn: false });
+    const record = await launchTask({ repo, title: "Add a Greeting!", request: "say hi" });
 
     expect(record.repo).toBe(repo);
     expect(record.branch).toMatch(/^add-a-greeting-[0-9a-f]{8}$/);
@@ -150,19 +174,22 @@ describe("launchTask", () => {
     expect(record.sessionDir).toBe(join(scratch, "agent", "factory", "sessions", `--${record.repo.slice(1).replaceAll("/", "-")}--`));
     expect(record.sessionId).not.toBe("");
     expect(await listTasks()).toEqual([record]);
+    await runnersEnded();
+    // The fake pi exits before it answers: the runner that got the start command says so in the task's log.
+    expect(readFileSync(taskLogPath(record.id), "utf8")).toContain("before it answered the prompt");
   });
 
   test("an override branch wins over the stored one", async () => {
     const repo = makeRepo("repo", "main");
     git(repo, "branch", "--quiet", "other");
     await saveSettings(repo, { branch: "missing" });
-    const record = await launchTask({ repo, title: "t", request: "r", overrides: { branch: "other" }, spawn: false });
+    const record = await launchTask({ repo, title: "t", request: "r", overrides: { branch: "other" } });
     expect(git(record.worktree, "rev-parse", "HEAD")).toBe(git(repo, "rev-parse", "other"));
   });
 
   test("a target branch that does not exist locally: refused before any worktree", async () => {
     const repo = makeRepo("repo", "main");
-    await expect(launchTask({ repo, title: "t", request: "r", overrides: { branch: "nope" }, spawn: false })).rejects.toThrow(
+    await expect(launchTask({ repo, title: "t", request: "r", overrides: { branch: "nope" } })).rejects.toThrow(
       "branch nope does not exist locally",
     );
     expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
@@ -170,14 +197,16 @@ describe("launchTask", () => {
 
   test("a target branch without factory.yaml: refused before any worktree", async () => {
     const repo = makeRepo("repo", "main", { "factory.yaml": null });
-    await expect(launchTask({ repo, title: "t", request: "r", spawn: false })).rejects.toThrow("branch main has no factory.yaml");
+    const refusal = launchTask({ repo, title: "t", request: "r" });
+    await expect(refusal).rejects.toThrow("branch main has no factory.yaml (write one with /factory init or the config.write action, and commit it)");
+    await expect(refusal).rejects.toBeInstanceOf(LaunchRefusedError);
     expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
   });
 
   test("without agent-worktree: git worktree add into <repo>/../worktrees/<repo name>/<name>", async () => {
     process.env.PATH = pathWithoutAgentWorktree;
     const repo = makeRepo("repo", "master");
-    const record = await launchTask({ repo, title: "Plain", request: "r", spawn: false });
+    const record = await launchTask({ repo, title: "Plain", request: "r" });
     expect(record.worktree).toBe(join(caseDir, "worktrees", "repo", record.branch));
     expect(git(record.worktree, "rev-parse", "--abbrev-ref", "HEAD")).toBe(record.branch);
     expect(git(record.worktree, "rev-parse", "HEAD")).toBe(git(repo, "rev-parse", "master"));
@@ -186,7 +215,7 @@ describe("launchTask", () => {
   test("hooks.after_create run in the worktree", async () => {
     process.env.PATH = pathWithoutAgentWorktree;
     const repo = makeRepo("repo", "main", { "factory.yaml": 'hooks:\n  after_create:\n    - ["sh", "-c", "pwd > created.txt"]\n' });
-    const record = await launchTask({ repo, title: "Hooked", request: "r", spawn: false });
+    const record = await launchTask({ repo, title: "Hooked", request: "r" });
     expect(await Bun.file(join(record.worktree, "created.txt")).text()).toBe(`${record.worktree}\n`);
   });
 
@@ -197,7 +226,7 @@ describe("launchTask", () => {
     test(`a failing hooks.after_create removes the worktree, the branch and the record (${label})`, async () => {
       if (!usesAgentWorktree) process.env.PATH = pathWithoutAgentWorktree;
       const repo = makeRepo("repo", "main", { "factory.yaml": 'hooks:\n  after_create:\n    - ["sh", "-c", "echo boom >&2; exit 3"]\n' });
-      await expect(launchTask({ repo, title: "Broken", request: "r", spawn: false })).rejects.toThrow(/hooks\.after_create sh -c .*exit 3.*boom/s);
+      await expect(launchTask({ repo, title: "Broken", request: "r" })).rejects.toThrow(/hooks\.after_create sh -c .*exit 3.*boom/s);
       expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
       expect(git(repo, "branch", "--list", "broken-*")).toBe("");
       for (const root of [join(caseDir, "worktrees", "repo"), join(scratch, "fake-worktrees")]) {
@@ -224,7 +253,7 @@ describe("launchTask failures", () => {
   test("agent-worktree create failing after its git worktree add: the worktree and branch it left are removed", async () => {
     process.env.FAKE_AW_FAIL = "1";
     const repo = makeRepo("repo", "main");
-    await expect(launchTask({ repo, title: "Leak", request: "r", spawn: false })).rejects.toThrow(/agent-worktree create leak-.*venv failed/s);
+    await expect(launchTask({ repo, title: "Leak", request: "r" })).rejects.toThrow(/agent-worktree create leak-.*venv failed/s);
     await nothingLeft(repo, "leak");
   });
 
@@ -234,13 +263,13 @@ describe("launchTask failures", () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 300);
     const started = Date.now();
-    await expect(launchTask({ repo, title: "Slow", request: "r", spawn: false, signal: controller.signal })).rejects.toThrow("the start was aborted");
+    await expect(launchTask({ repo, title: "Slow", request: "r", signal: controller.signal })).rejects.toThrow("the start was aborted");
     expect(Date.now() - started).toBeLessThan(8000);
     await nothingLeft(repo, "slow");
   }, 15_000);
 
   test("a repo path outside any git repository is refused naming it", async () => {
-    await expect(launchTask({ repo: caseDir, title: "t", request: "r", spawn: false })).rejects.toThrow(`${caseDir} is not inside a git repository`);
+    await expect(launchTask({ repo: caseDir, title: "t", request: "r" })).rejects.toThrow(`${caseDir} is not inside a git repository`);
   });
 });
 
@@ -248,9 +277,14 @@ describe("deleteTask", () => {
   test("removes the task's own branch through git, never the branch checked out in its worktree", async () => {
     const repo = makeRepo("repo", "main");
     git(repo, "branch", "--quiet", "precious");
-    const record = await launchTask({ repo, title: "Switch", request: "r", spawn: false });
+    const record = await launchTask({ repo, title: "Switch", request: "r" });
     git(record.worktree, "checkout", "--quiet", "precious");
+    writeFileSync(taskInboxPath(record.id), `${JSON.stringify({ text: "hi" })}\n`);
+    writeFileSync(`${taskInboxPath(record.id)}.read`, "0\n");
+    await runnersEnded();
     await deleteTask(record);
+    expect(existsSync(taskInboxPath(record.id))).toBe(false);
+    expect(existsSync(`${taskInboxPath(record.id)}.read`)).toBe(false);
     expect(git(repo, "branch", "--list", "precious")).toBe("precious");
     expect(git(repo, "branch", "--list", record.branch)).toBe("");
     expect(existsSync(record.worktree)).toBe(false);
@@ -268,5 +302,36 @@ describe("liveRunners", () => {
 
   test("no runner: an empty list", async () => {
     expect(await liveRunners({ sessionId: crypto.randomUUID() })).toEqual([]);
+  });
+});
+
+describe("unmergedWork", () => {
+  test("without a target: the commits of the task's branch no other local branch has", async () => {
+    const repo = makeRepo("repo", "main");
+    git(repo, "worktree", "add", "--quiet", "-b", "t", join(caseDir, "t-wt"));
+    writeFileSync(join(caseDir, "t-wt", "x.txt"), "x\n");
+    git(join(caseDir, "t-wt"), "add", "-A");
+    git(join(caseDir, "t-wt"), "commit", "--quiet", "-m", "x");
+    const record = { id: "i", repo, worktree: join(caseDir, "t-wt"), branch: "t", title: "t", sessionId: "s", sessionDir: caseDir, createdAt: "x" };
+    expect(await unmergedWork(record, undefined)).toEqual({ commits: 1, dirty: false });
+    expect(await unmergedWork(record, "main")).toEqual({ commits: 1, dirty: false });
+  });
+});
+
+describe("runnerSpawn", () => {
+  const command = ["/bin/bun", "runner.ts", "a"];
+  const env = { PATH: "/bin", FACTORY_TASK_LOCK: "/l" };
+
+  test("under a systemd service with systemd-run: a user scope of its own, the user bus reachable", () => {
+    const host = { INVOCATION_ID: "abc", XDG_RUNTIME_DIR: "/run/user/1", DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1/bus", SECRET: "s" };
+    expect(runnerSpawn(command, env, host, "/usr/bin/systemd-run")).toEqual({
+      argv: ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--", ...command],
+      env: { ...env, XDG_RUNTIME_DIR: "/run/user/1", DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1/bus" },
+    });
+  });
+
+  test("outside a systemd service, or without systemd-run: the command as it is", () => {
+    expect(runnerSpawn(command, env, { XDG_RUNTIME_DIR: "/run/user/1" }, "/usr/bin/systemd-run")).toEqual({ argv: command, env });
+    expect(runnerSpawn(command, env, { INVOCATION_ID: "abc" }, null)).toEqual({ argv: command, env });
   });
 });

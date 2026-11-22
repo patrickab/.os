@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { factoryHome } from "./settings.ts";
-import { listTasks, lockTask, removeTask, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
+import { listTasks, lockTask, removeTask, TaskBusyError, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "factory-tasks-test-")));
 const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -92,6 +92,7 @@ describe("task lock", () => {
     await lockTask(ONE);
     expect(readFileSync(taskLockPath(ONE), "utf8")).toStartWith(`${process.pid} `);
     await expect(lockTask(ONE)).rejects.toThrow(`task ${ONE.slice(0, 8)} is busy`);
+    await expect(lockTask(ONE)).rejects.toBeInstanceOf(TaskBusyError);
     await unlockTask(ONE);
     expect(existsSync(taskLockPath(ONE))).toBe(false);
     await lockTask(ONE);

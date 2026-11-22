@@ -7,7 +7,7 @@
  * - Provides the task lock `<id>.lock` (`lockTask`, `handTaskLock`, `unlockTask`): whoever checks a task's state and
  *   then acts on it (spawns a runner, deletes the task) holds it, and a spawned runner holds it until it exits. The
  *   file holds `<pid> <start time>` of its holder; a holder that no longer runs (`hostLiveness`) leaves a stale lock
- *   the next `lockTask` takes over
+ *   the next `lockTask` takes over; a lock a live process holds is a `TaskBusyError`
  */
 import { link, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -51,7 +51,7 @@ export function taskLockPath(id: string): string {
   return join(tasksDir(), `${id}.lock`);
 }
 
-function parseTaskRecord(raw: unknown, id: string): TaskRecord {
+export function parseTaskRecord(raw: unknown, id: string): TaskRecord {
   if (!isRecord(raw)) throw new Error("the record is not an object");
   for (const key of RECORD_KEYS) {
     if (typeof raw[key] !== "string" || raw[key] === "") throw new Error(`${key} must be a non-empty string`);
@@ -112,6 +112,9 @@ export async function removeTask(id: string): Promise<void> {
   await rm(taskLockPath(id), { force: true });
 }
 
+/** `lockTask` found the lock held by a live process. */
+export class TaskBusyError extends Error {}
+
 async function lockOwner(pid: number): Promise<string> {
   return `${pid} ${(await procStart(pid)) ?? "0"}\n`;
 }
@@ -123,7 +126,7 @@ async function lockHeld(path: string): Promise<boolean> {
   return pid !== "" && (await hostLiveness(Number(pid), start));
 }
 
-/** Takes the task's lock for this process. Throws an `Error` of one sentence while a live process holds it. */
+/** Takes the task's lock for this process. Throws a `TaskBusyError` of one sentence while a live process holds it. */
 export async function lockTask(id: string): Promise<void> {
   await mkdir(tasksDir(), { recursive: true });
   const path = taskLockPath(id);
@@ -144,12 +147,16 @@ export async function lockTask(id: string): Promise<void> {
   } finally {
     await rm(temp, { force: true });
   }
-  throw new Error(`task ${id.slice(0, 8)} is busy: another factory action or its runner holds it, try again once it has ended`);
+  throw new TaskBusyError(`task ${id.slice(0, 8)} is busy: another factory action or its runner holds it, try again once it has ended`);
 }
 
 /** Passes the lock this process holds to the process `pid` (a runner it spawned), which removes it when it exits. */
 export async function handTaskLock(id: string, pid: number): Promise<void> {
-  const path = taskLockPath(id);
+  await handLockFile(taskLockPath(id), pid);
+}
+
+/** `handTaskLock` by the lock file's path (a runner knows only `FACTORY_TASK_LOCK`). */
+export async function handLockFile(path: string, pid: number): Promise<void> {
   const temp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
     await writeFile(temp, await lockOwner(pid), "utf8");

@@ -207,10 +207,16 @@ export function mergeFailedPrompt(error: string): string {
   return `${MERGE_FAILED_PROMPT_START}${error}\nFix the cause, then stop.`;
 }
 
-function userText(message: { content?: unknown }): string {
+/** The text parts of a message's content (a string, or parts of which only `text` ones count), joined by newlines. */
+export function messageText(message: { content?: unknown }): string {
   if (typeof message.content === "string") return message.content;
   if (!Array.isArray(message.content)) return "";
   return message.content.flatMap((part) => (part?.type === "text" && typeof part.text === "string" ? [part.text] : [])).join("\n");
+}
+
+/** A user message the plugin sent itself: a `/factory` command or the prompt of `/factory retry`. */
+export function isFactoryPrompt(text: string): boolean {
+  return text.trimStart().startsWith("/factory") || text === RETRY_PROMPT || text.startsWith(MERGE_FAILED_PROMPT_START);
 }
 
 /**
@@ -228,12 +234,12 @@ export function followUpMessages(entries: Iterable<{ type: string }>): string[] 
       requestSeen = false;
     }
     if (!messages || entry.type !== "message" || message?.role !== "user") continue;
-    const text = userText(message);
+    const text = messageText(message);
     if (!requestSeen) {
       requestSeen = true;
       continue;
     }
-    if (text.trimStart().startsWith("/factory") || text === RETRY_PROMPT || text.startsWith(MERGE_FAILED_PROMPT_START)) continue;
+    if (isFactoryPrompt(text)) continue;
     messages.push(text);
   }
   return messages ?? [];

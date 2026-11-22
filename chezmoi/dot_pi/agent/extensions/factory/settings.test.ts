@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { factoryHome, loadSettings, resolveSettings, saveSettings, type StoredSettings } from "./settings.ts";
+import { homedir } from "node:os";
+import { factoryHome, loadSettings, registeredRepos, resolveRepoSettings, resolveSettings, saveSettings, unregisterRepo, type StoredSettings } from "./settings.ts";
 
 const REPO = "/home/someone/git/project";
 const REPO_FILE = "%2Fhome%2Fsomeone%2Fgit%2Fproject.yaml";
@@ -41,6 +42,23 @@ describe("paths", () => {
     expect(await readdir(join(agentDir, "factory", "repos"))).toEqual([REPO_FILE]);
   });
 
+  test("factoryHome without PI_CODING_AGENT_DIR is ~/.pi/agent/factory; a leading ~ is the home dir", () => {
+    delete process.env.PI_CODING_AGENT_DIR;
+    expect(factoryHome()).toBe(join(homedir(), ".pi", "agent", "factory"));
+    process.env.PI_CODING_AGENT_DIR = "~/agent-x";
+    expect(factoryHome()).toBe(join(homedir(), "agent-x", "factory"));
+  });
+
+  test("a settings file registers its repo: registeredRepos lists them sorted, unregisterRepo removes one", async () => {
+    expect(await registeredRepos()).toEqual([]);
+    await saveSettings("/b/repo", {});
+    await saveSettings(REPO, {});
+    expect(await registeredRepos()).toEqual(["/b/repo", REPO]);
+    expect(await unregisterRepo(REPO)).toBe(true);
+    expect(await unregisterRepo(REPO)).toBe(false);
+    expect(await registeredRepos()).toEqual(["/b/repo"]);
+  });
+
   test("two repos whose paths differ only in / and - have their own settings", async () => {
     await saveSettings("/a/b-c", { merge: "review" });
     expect(await loadSettings("/a-b/c")).toEqual({});
@@ -76,6 +94,7 @@ describe("loadSettings", () => {
     ["models not a mapping", "models: a/b\n", "models"],
     ["coder model without provider", "models:\n  coder: sonnet\n", "models.coder"],
     ["reviewer model not a string", "models:\n  reviewer: 4\n", "models.reviewer"],
+    ["preview", "preview: 1\n", "preview"],
   ];
   for (const [name, text, key] of invalid) {
     test(`an invalid file throws naming the file and the key: ${name}`, async () => {
@@ -142,6 +161,14 @@ describe("resolveSettings", () => {
     expect(resolveSettings(stored, { branch: "release" }, "main").branch).toBe("release");
     expect(stored).toEqual(storedCopy);
     expect(overrides).toEqual(overridesCopy);
+  });
+
+  test("preview is stored and passed through, false by default; resolveSettings leaves it out", async () => {
+    await saveSettings(REPO, { preview: true });
+    expect(await loadSettings(REPO)).toEqual({ preview: true });
+    expect(resolveRepoSettings({ preview: true }, {}, "main")).toEqual({ ...DEFAULTS, branch: "main", preview: true });
+    expect(resolveRepoSettings({}, {}, "main").preview).toBe(false);
+    expect(resolveSettings({ preview: true }, {}, "main")).toEqual({ ...DEFAULTS, branch: "main" });
   });
 
   test("the result does not share the models object of an input", () => {

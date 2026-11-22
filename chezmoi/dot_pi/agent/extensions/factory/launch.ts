@@ -6,23 +6,26 @@
  *   creates the task's worktree on a new branch
  *   (`agent-worktree` when it is on PATH, else `git worktree add`), runs the repo's `hooks.after_create` in it, writes
  *   the `TaskRecord` and starts the detached runner with `/factory start <json>`. A failing or aborted step undoes the
- *   earlier ones, through git only
- * - Provides `sendCommand`: one more message to a task's session, through a new detached runner that takes over the
- *   task lock its caller holds
- * - Provides `defaultBranch` and `startCommand` (the payload `parseStartPayload` accepts)
+ *   earlier ones, through git only. A missing target branch or `factory.yaml` throws a `LaunchRefusedError`
+ * - Provides `sendCommand`: one more message to a task's session, through a new detached runner (the caller's `env`;
+ *   `runnerSpawn` puts it in a systemd user scope under a service) that takes over the task lock its caller holds;
+ *   `messageTask`: a message to the coder in any state but merging (`taskInboxPath` of a live runner, else a new
+ *   runner); a state refusal is a `MessageRefusedError`
+ * - Provides `defaultBranch`, `localBranchExists` and `startCommand` (the payload `parseStartPayload` accepts)
  * - Provides `liveRunners`/`stopRunners` (a task's runner processes, found with `pgrep -f`), `unmergedWork` and
- *   `deleteTask` (worktree, branch, record and log, removed through git: the task's own branch, never another)
+ *   `deleteTask` (worktree, branch, record, log and inbox, removed through git: the task's own branch, never another)
  */
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { appendFile, mkdir, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseFactoryYaml } from "./config.ts";
 import { git, primaryCheckout } from "./git.ts";
+import { inboxReadPath, lastFactoryState } from "./runner.ts";
 import { CommandRunner, runCommand, type Exec } from "./run.ts";
 import { factoryHome, loadSettings, resolveSettings, type StoredSettings } from "./settings.ts";
 import type { Settings, StartPayload } from "./state.ts";
-import { handTaskLock, lockTask, removeTask, taskLockPath, taskLogPath, tasksDir, writeTask, type TaskRecord } from "./tasks.ts";
+import { handTaskLock, lockTask, removeTask, TaskBusyError, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
 import { outputTail } from "./util.ts";
 
 const RUNNER_PATH = join(import.meta.dir, "runner.ts");
@@ -36,7 +39,7 @@ function onPath(binary: string): string | null {
   return Bun.which(binary, { PATH: process.env.PATH ?? "" });
 }
 
-async function localBranchExists(repo: string, branch: string): Promise<boolean> {
+export async function localBranchExists(repo: string, branch: string): Promise<boolean> {
   const result = await runCommand(["git", "show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repo });
   return result.exitCode === 0;
 }
@@ -117,16 +120,25 @@ async function runAfterCreate(exec: Exec, worktree: string): Promise<void> {
   }
 }
 
+/** A launch the repository's branches forbid: the target branch is missing or has no committed `factory.yaml`. */
+export class LaunchRefusedError extends Error {}
+
+/** A message `messageTask` refuses for the task's state (merging, not started). */
+export class MessageRefusedError extends Error {}
+
+/** The environment of the runners a caller starts (`process.env` when it gives none). */
+export type RunnerEnv = Record<string, string | undefined>;
+
 export interface LaunchInput {
   /** A path in the repository; the task records its primary checkout. */
   repo: string;
   title: string;
   request: string;
   overrides?: StoredSettings;
-  /** `false`: create the worktree and the record, start no runner (a host that holds the task's session itself). */
-  spawn?: boolean;
   /** Aborting it before the runner is started kills the running hook and undoes the launch. */
   signal?: AbortSignal;
+  /** The runner's environment. */
+  env?: RunnerEnv;
 }
 
 export async function launchTask(input: LaunchInput): Promise<TaskRecord> {
@@ -139,10 +151,17 @@ export async function launchTask(input: LaunchInput): Promise<TaskRecord> {
   const stored = await loadSettings(repo);
   const overrides = input.overrides ?? {};
   const explicit = overrides.branch ?? stored.branch;
-  const settings = resolveSettings(stored, overrides, explicit ?? (await defaultBranch(repo)));
-  if (!(await localBranchExists(repo, settings.branch))) throw new Error(`${repo}: branch ${settings.branch} does not exist locally`);
+  const fallback =
+    explicit ??
+    (await defaultBranch(repo).catch(() => {
+      throw new LaunchRefusedError(`${repo} has no default branch (origin/HEAD, main and master do not exist locally)`);
+    }));
+  const settings = resolveSettings(stored, overrides, fallback);
+  if (!(await localBranchExists(repo, settings.branch))) throw new LaunchRefusedError(`${repo}: branch ${settings.branch} does not exist locally`);
   const config = await runCommand(["git", "cat-file", "-e", `refs/heads/${settings.branch}:factory.yaml`], { cwd: repo });
-  if (config.exitCode !== 0) throw new Error(`${repo}: branch ${settings.branch} has no factory.yaml (write one with /factory init and commit it)`);
+  if (config.exitCode !== 0) {
+    throw new LaunchRefusedError(`${repo}: branch ${settings.branch} has no factory.yaml (write one with /factory init or the config.write action, and commit it)`);
+  }
 
   const id = crypto.randomUUID();
   const name = `${slug(input.title)}-${id.slice(0, 8)}`;
@@ -171,10 +190,8 @@ export async function launchTask(input: LaunchInput): Promise<TaskRecord> {
       };
       await writeTask(record);
       recorded = true;
-      if (input.spawn !== false) {
-        await lockTask(id);
-        await sendCommand(record, startCommand(input.title, input.request, settings));
-      }
+      await lockTask(id);
+      await sendCommand(record, startCommand(input.title, input.request, settings), input.env);
       return record;
     } catch (error) {
       if (recorded) await removeTask(id).catch(() => undefined);
@@ -186,11 +203,27 @@ export async function launchTask(input: LaunchInput): Promise<TaskRecord> {
   }
 }
 
+/** What a systemd user scope needs to reach the user manager; copied from the host when `env` lacks it. */
+const SYSTEMD_USER_ENV = ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"];
+
 /**
- * Starts `bun runner.ts` for `message` in its own process group, detached, output appended to the task's log. The
- * caller holds the task lock (`lockTask`): it passes to the runner, which removes it when it exits.
+ * The argv and environment of a runner. Under a systemd service (`INVOCATION_ID` in `hostEnv`) with `systemdRun` on
+ * PATH it runs in a user scope of its own, outside the service's control group: a restart of the service leaves it.
+ * `systemd-run --scope` execs the command, so the spawned pid is the runner's.
  */
-export async function sendCommand(record: TaskRecord, message: string): Promise<void> {
+export function runnerSpawn(command: string[], env: RunnerEnv, hostEnv: RunnerEnv, systemdRun: string | null): { argv: string[]; env: RunnerEnv } {
+  if (!hostEnv.INVOCATION_ID || systemdRun === null) return { argv: command, env };
+  const scopeEnv = { ...env };
+  for (const key of SYSTEMD_USER_ENV) if (scopeEnv[key] === undefined && hostEnv[key] !== undefined) scopeEnv[key] = hostEnv[key];
+  return { argv: [systemdRun, "--user", "--scope", "--quiet", "--", ...command], env: scopeEnv };
+}
+
+/**
+ * Starts `bun runner.ts` for `message` in its own process group, detached, output appended to the task's log, with
+ * `env` (default `process.env`) plus the lock path. The caller holds the task lock (`lockTask`): it passes to the
+ * runner, which removes it when it exits.
+ */
+export async function sendCommand(record: TaskRecord, message: string, env: RunnerEnv = process.env): Promise<void> {
   const bun = onPath("bun");
   if (bun === null) throw new Error("bun is not on PATH: the task runner needs it");
   await mkdir(tasksDir(), { recursive: true });
@@ -198,11 +231,17 @@ export async function sendCommand(record: TaskRecord, message: string): Promise<
   const log = openSync(taskLogPath(record.id), "a");
   let pid: number | undefined;
   try {
-    const child = spawn(bun, [RUNNER_PATH, record.worktree, record.sessionDir, record.sessionId, message], {
+    const runner = runnerSpawn(
+      [bun, RUNNER_PATH, record.worktree, record.sessionDir, record.sessionId, taskInboxPath(record.id), message],
+      // A task runs without pauses, so the default short prompt cache is enough and the dearer long cache writes are not.
+      { ...env, FACTORY_TASK_LOCK: taskLockPath(record.id), PI_CACHE_RETENTION: "short" },
+      process.env,
+      onPath("systemd-run"),
+    );
+    const child = spawn(runner.argv[0], runner.argv.slice(1), {
       cwd: dirname(RUNNER_PATH),
       detached: true,
-      // A task runs without pauses, so the default short prompt cache is enough and the dearer long cache writes are not.
-      env: { ...process.env, FACTORY_TASK_LOCK: taskLockPath(record.id), PI_CACHE_RETENTION: "short" },
+      env: runner.env,
       stdio: ["ignore", log, log],
     });
     await new Promise<void>((resolveSpawn, reject) => {
@@ -215,6 +254,39 @@ export async function sendCommand(record: TaskRecord, message: string): Promise<
     closeSync(log);
   }
   if (pid !== undefined) await handTaskLock(record.id, pid);
+}
+
+/** The messages for a task's live runner, one JSON `{"text"}` per line; the runner stores how far it sent them in `<inbox>.read`. */
+export function taskInboxPath(id: string): string {
+  return join(tasksDir(), `${id}.inbox`);
+}
+
+/**
+ * A message for the task's coder. A live runner holds the task: one line in its inbox, which it sends to Pi as a
+ * follow-up. Resting or interrupted: takes the task lock and starts a runner with `text` as the prompt and `env`, the
+ * lock handed to it. Throws a `MessageRefusedError` of one sentence while the task merges or before it has a state, a
+ * `TaskBusyError` while another holds its lock.
+ */
+export async function messageTask(record: TaskRecord, text: string, env?: RunnerEnv): Promise<void> {
+  const refuseState = async () => {
+    const state = await lastFactoryState(record.sessionDir, record.sessionId);
+    if (state === undefined) throw new MessageRefusedError(`task ${record.id.slice(0, 8)} has not started yet, send the message once it runs`);
+    if (state.state === "merging") throw new MessageRefusedError(`task ${record.id.slice(0, 8)} is merging, send the message when the merge has ended`);
+  };
+  const toInbox = async () => {
+    await mkdir(tasksDir(), { recursive: true });
+    await appendFile(taskInboxPath(record.id), `${JSON.stringify({ text })}\n`, "utf8");
+  };
+  await refuseState();
+  if ((await liveRunners(record)).length > 0) return toInbox();
+  await lockTask(record.id);
+  try {
+    await refuseState();
+    if ((await liveRunners(record)).length > 0) throw new TaskBusyError(`task ${record.id.slice(0, 8)} is busy: its last runner is still ending, try again in a few seconds`);
+    await sendCommand(record, text, env);
+  } finally {
+    await unlockTask(record.id);
+  }
 }
 
 /** The pids of the runners of a task still alive, found by their command line (`runner.ts ... <sessionId> ...`). */
@@ -275,7 +347,8 @@ export async function unmergedWork(record: TaskRecord, target: string | undefine
     const range =
       target !== undefined && (await localBranchExists(record.repo, target))
         ? [`refs/heads/${target}..refs/heads/${record.branch}`]
-        : [`refs/heads/${record.branch}`, "--not", `--exclude=refs/heads/${record.branch}`, "--branches"];
+        : // `--exclude` matches what `--branches` lists: names below refs/heads/.
+          [`refs/heads/${record.branch}`, "--not", `--exclude=${record.branch}`, "--branches"];
     commits = Number(await git(runCommand, record.repo, ["rev-list", "--count", ...range]));
   }
   let dirty = false;
@@ -286,12 +359,14 @@ export async function unmergedWork(record: TaskRecord, target: string | undefine
   return { commits, dirty };
 }
 
-/** Removes the task's worktree, its own branch (through git), its record, its runner log and its lock. The session file stays. */
+/** Removes the task's worktree, its own branch (through git), its record, its runner log, its lock and its inbox. The session file stays. */
 export async function deleteTask(record: TaskRecord): Promise<void> {
   await removeWorktree(record.repo, record.worktree, record.branch);
   if (existsSync(record.worktree)) throw new Error(`${record.worktree}: the worktree could not be removed`);
   if (await localBranchExists(record.repo, record.branch)) throw new Error(`${record.repo}: the branch ${record.branch} could not be deleted`);
   await removeTask(record.id);
+  await rm(taskInboxPath(record.id), { force: true });
+  await rm(inboxReadPath(taskInboxPath(record.id)), { force: true });
 }
 
 /** Pi's directory name of a path (`/a/b` -> `--a-b--`): one sessions folder per repository, as pi-host names it. */
