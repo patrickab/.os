@@ -13,3 +13,6 @@ hooks:
 gates: []
 # Everything, tests included: run in the merge queue on the rebased branch, before the fast-forward.
 merge_gates: []
+# File names (no directory) of lockfiles: a merge that changes one runs after_merge, and they go last in the
+# patch the reviewer reads. Unset means the list below.
+# lockfiles: [uv.lock, package-lock.json, bun.lock, bun.lockb]

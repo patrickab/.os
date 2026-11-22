@@ -32,6 +32,7 @@ import {
   type State,
   type Trigger,
 } from "./state.ts";
+import { errorText } from "./util.ts";
 
 export interface PipelineSteps {
   status(text: string): void;
@@ -52,10 +53,6 @@ export interface RoundResult {
   entries: Draft[];
   /** True when the entries end with feedback and the coder runs the next round. */
   continue: boolean;
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Exit code of a hook or gate whose environment is broken (missing packages, tools, services): not the coder's to fix. */
@@ -88,27 +85,34 @@ function nextRound(snapshot: Snapshot, trigger: Trigger, text: string): RoundRes
 export async function runMerge(snapshot: Snapshot, config: FactoryConfig, steps: PipelineSteps): Promise<Draft[]> {
   const { round } = snapshot;
   steps.status(`round ${round}: merge`);
-  const { gates, merge, conflicts, failedGate } = await steps.merge(config);
+  const { gates, result } = await steps.merge(config);
   const drafts: Draft[] = gates.map((gate) => customDraft("factory-gate", gate));
   // Nothing was merged: the coder resolves the conflict or the failed gate in a round of its own, unless cancelled.
-  if ((conflicts || failedGate) && steps.cancelled()) return [...drafts, stateDraft("cancelled", round, "cancelled")];
-  if (failedGate?.result.exitCode === INFRA_EXIT && !failedGate.result.killed) return [...drafts, stateDraft("blocked", round, `infra: ${lastLine(failedGate.result.output)}`)];
-  const problem = conflicts
-    ? { trigger: "conflict" as const, text: conflictFeedback(round, snapshot.task.mainBranch, conflicts, false) }
-    : failedGate
-      ? { trigger: "gates" as const, text: `After the rebase onto ${snapshot.task.mainBranch}: ${commandFeedback(round, failedGate.argv, failedGate.result)}` }
-      : null;
-  if (problem) {
-    const next = nextRound(snapshot, problem.trigger, problem.text);
-    const state = next.continue ? stateDraft("running", round + 1, problem.trigger) : stateDraft("blocked", round, `max_rounds: ${problem.trigger}`);
+  const problem = (trigger: Trigger, text: string): Draft[] => {
+    const next = nextRound(snapshot, trigger, text);
+    const state = next.continue ? stateDraft("running", round + 1, trigger) : stateDraft("blocked", round, `max_rounds: ${trigger}`);
     return [...drafts, ...next.entries, state];
+  };
+  switch (result.kind) {
+    case "conflict":
+      if (steps.cancelled()) return [...drafts, stateDraft("cancelled", round, "cancelled")];
+      return problem("conflict", conflictFeedback(round, snapshot.task.mainBranch, result.files, false));
+    case "gate_failed": {
+      const { argv, result: gate } = result.gate;
+      if (steps.cancelled()) return [...drafts, stateDraft("cancelled", round, "cancelled")];
+      if (gate.exitCode === INFRA_EXIT && !gate.killed) return [...drafts, stateDraft("blocked", round, `infra: ${lastLine(gate.output)}`)];
+      return problem("gates", `After the rebase onto ${snapshot.task.mainBranch}: ${commandFeedback(round, argv, gate)}`);
+    }
+    case "merged": {
+      const { merge } = result;
+      // A failed `after_merge` hook cannot undo the merge: the task is done, and says what is left to do.
+      return [...drafts, customDraft("factory-merge", merge), stateDraft("done", round, merge.error ? "merged, after_merge failed" : "merged")];
+    }
+    case "failed":
+      drafts.push(customDraft("factory-merge", result.merge));
+      drafts.push(steps.cancelled() ? stateDraft("cancelled", round, "cancelled") : stateDraft("blocked", round, "merge_failed"));
+      return drafts;
   }
-  drafts.push(customDraft("factory-merge", merge));
-  // A failed `after_merge` hook cannot undo the merge: the task is done, and says what is left to do.
-  if (merge.ok) drafts.push(stateDraft("done", round, merge.error ? "merged, after_merge failed" : "merged"));
-  else if (steps.cancelled()) drafts.push(stateDraft("cancelled", round, "cancelled"));
-  else drafts.push(stateDraft("blocked", round, "merge_failed"));
-  return drafts;
 }
 
 /** Everything after a coder turn: hooks, gates, protected paths, review, then `merging` or the wait for approve. */

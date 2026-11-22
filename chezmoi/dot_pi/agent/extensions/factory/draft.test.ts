@@ -2,7 +2,9 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { parseFactoryConfig } from "./config.ts";
 import { draftFactoryYaml, initDraft, repoFiles, TEMPLATE_PATH } from "./draft.ts";
+import { LOCKFILES } from "./git.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -35,6 +37,15 @@ describe("draftFactoryYaml", () => {
       expect(lines[lines.findIndex((line) => line.startsWith(key)) - 1]!.startsWith("#")).toBe(true);
     }
     expect(template).not.toContain("preview:");
+  });
+
+  test("the template and a filled draft parse as a factory config, lockfiles documented but left at the default", () => {
+    const template = readFileSync(TEMPLATE_PATH, "utf-8");
+    expect(template).toContain(`# lockfiles: [${LOCKFILES.join(", ")}]`);
+    expect(parseFactoryConfig(Bun.YAML.parse(initDraft(repo()).text)).lockfiles).toEqual(LOCKFILES);
+    const filled = parseFactoryConfig(Bun.YAML.parse(initDraft(repo({ Makefile: "lint:\n\tx\ntest:\n\ty\n" })).text));
+    expect(filled.merge_gates).toEqual([["make", "lint"], ["make", "test"]]);
+    expect(filled.lockfiles).toEqual(LOCKFILES);
   });
 
   test("works on any file source, not only the disk", () => {

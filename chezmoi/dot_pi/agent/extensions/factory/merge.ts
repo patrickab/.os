@@ -5,25 +5,26 @@
  * - Commit, rebase onto the target branch, gates again (`merge_gates`, skipped when the rebase moved nothing), then
  *   under the merge lock (a cancel ends the wait for it, never the update): a target checked out in a worktree (the
  *   primary or another one) is fast-forwarded there, and `hooks.after_merge` run when that is the primary and the
- *   merge changed a lockfile; a target checked out nowhere is moved with a compare-and-swap `update-ref`, no hooks
- * - A conflicting rebase is aborted and reported with its files (`MergeOutcome.conflicts`), not as a failure. A merge
- *   gate that fails on the rebased branch is reported with its command (`MergeOutcome.failedGate`): the rebase stays,
+ *   merge changed a lockfile (`config.lockfiles`); a target checked out nowhere is moved with a compare-and-swap
+ *   `update-ref`, no hooks
+ * - A conflicting rebase is aborted and reported with its files (`MergeResult` `conflict`), not as a failure. A merge
+ *   gate that fails on the rebased branch is reported with its command (`MergeResult` `gate_failed`): the rebase stays,
  *   so the coder fixes the change on top of the target branch
  * - Provides `rebaseWorktree`, which a run that opens uses to bring the task branch up to date the same way. It
  *   squashes the task branch onto its base first (`taskBase`): the rebase replays one commit, the task's net change
  * - The factory's own commits run no commit hooks and are not signed (`--no-verify --no-gpg-sign`)
  * - Reports the step that cannot be undone (`intent`) right before it, so a resume can tell whether it happened
- * - Provides `mergeTask`: the `factory-merge` data and the `factory-gate` data of the commands it ran. It never
- *   throws, a failure is `ok: false` with the reason
+ * - Provides `mergeTask`: the `MergeResult` and the `factory-gate` data of the commands it ran. It never throws, a
+ *   failure is a `failed` result whose `factory-merge` data is `ok: false` with the reason
  */
 import { basename, join } from "node:path";
 import type { FactoryConfig } from "./config.ts";
-import { addAllArgs, assertCheckoutReady, git, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, targetMoved, taskBase } from "./git.ts";
+import { addAllArgs, assertCheckoutReady, git, nulList, primaryCheckout, rebaseInProgress, targetMoved, taskBase } from "./git.ts";
 import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import type { CommandResult, Exec } from "./run.ts";
 import { gateData, passed, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
+import { ERROR_TAIL_CHARS, errorText, outputTail } from "./util.ts";
 
-const ERROR_TAIL_CHARS = 1000;
 /** How long a merge waits for the merge lock, polling once a second. */
 const LOCK_WAIT_MS = 60_000;
 /** `flock -n -E` exit code of a lock someone else holds. */
@@ -66,16 +67,23 @@ export interface MergeInput {
   status?: (text: string) => void;
 }
 
+export type GateFailure = { argv: string[]; result: CommandResult };
+
+/**
+ * How a merge ended. `merged`: the main branch is at the task's commit (`merge.ok`). `failed`: nothing was merged, the
+ * `factory-merge` data says why. `conflict`: the rebase onto the main branch conflicted on `files` and was aborted.
+ * `gate_failed`: a merge gate failed on the rebased branch. Nothing was merged after a `conflict` or a `gate_failed`.
+ */
+export type MergeResult =
+  | { kind: "merged"; merge: MergeData }
+  | { kind: "failed"; merge: MergeData }
+  | { kind: "conflict"; files: string[] }
+  | { kind: "gate_failed"; gate: GateFailure };
+
 export interface MergeOutcome {
   gates: GateData[];
-  merge: MergeData;
-  /** The files of a rebase onto the main branch that conflicted and was aborted, else null. Nothing was merged then. */
-  conflicts: string[] | null;
-  /** The merge gate that failed on the rebased branch, else null. Nothing was merged then. */
-  failedGate: GateFailure | null;
+  result: MergeResult;
 }
-
-export type GateFailure = { argv: string[]; result: CommandResult };
 
 /**
  * Brings the task branch up to date: commits the worktree as `commitWorktree` does, squashes the branch onto its base,
@@ -97,7 +105,7 @@ export async function rebaseWorktree(exec: Exec, cleanup: Exec, root: string, ta
   const conflicts = open ?? [];
   if (open !== null || rebase.killed) await cleanup(["git", "rebase", "--abort"], { cwd: root });
   if (conflicts.length > 0 && !rebase.killed) return conflicts;
-  throw new Error(`rebase onto ${task.mainBranch} failed: ${rebase.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
+  throw new Error(`rebase onto ${task.mainBranch} failed: ${outputTail(rebase.output)}`);
 }
 
 /**
@@ -115,7 +123,7 @@ async function squashOntoBase(exec: Exec, root: string, task: Task): Promise<voi
 /** 0 means nothing staged, 1 something. Any other exit is a git failure, never "nothing to commit". */
 async function hasStagedChanges(exec: Exec, root: string): Promise<boolean> {
   const staged = await exec(["git", "diff", "--cached", "--quiet"], { cwd: root });
-  if (staged.killed || (staged.exitCode !== 0 && staged.exitCode !== 1)) throw new Error(`git diff --cached: ${staged.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
+  if (staged.killed || (staged.exitCode !== 0 && staged.exitCode !== 1)) throw new Error(`git diff --cached: ${outputTail(staged.output)}`);
   return staged.exitCode === 1;
 }
 
@@ -131,11 +139,12 @@ function tryMoveTarget(cleanup: Exec, lock: string, root: string, primary: strin
   return cleanup(argv, { cwd: root, maxStdoutChars: 100 });
 }
 
-async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<MergeData | string[] | GateFailure> {
+async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<MergeResult> {
   const { exec, cleanup, root, round, task, config, intent } = input;
   const status = input.status ?? (() => undefined);
-  const result = (ok: boolean, commit: string | null, error: string | null, depsSynced: boolean): MergeData => ({ ok, commit, error, depsSynced });
-  const fail = (error: string) => result(false, null, error, false);
+  const merged = (commit: string, error: string | null, depsSynced: boolean): MergeResult => ({ kind: "merged", merge: { ok: true, commit, error, depsSynced } });
+  const fail = (error: string): MergeResult => ({ kind: "failed", merge: { ok: false, commit: null, error, depsSynced: false } });
+  // Unlike `outputTail`, no "killed" for an empty output: these commands ran to their exit code.
   const tail = (output: string) => output.trim().slice(-ERROR_TAIL_CHARS);
 
   const { primary, gitDir } = await primaryCheckout(exec, root);
@@ -151,32 +160,17 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
   // Rebased before it queues: a conflict goes to the coder at once, without a place in the queue.
   status(`rebase onto ${task.mainBranch}`);
   const conflicts = await rebaseWorktree(exec, cleanup, root, task, config.protected);
-  if (conflicts) return conflicts;
-  const ticket = await joinQueue(gitDir);
-  try {
-    for (let ahead = await queueAhead(ticket); ahead > 0; ahead = await queueAhead(ticket)) {
-      status(`queued for merge, ${ahead} ahead`);
-      if ((await exec(["sleep", String(QUEUE_POLL_MS / 1000)], { cwd: root })).killed) return fail("cancelled while queued for merge");
-      // A merge ahead landed: rebase onto it now, a conflict leaves the queue and goes to the coder.
-      if (!(await targetMoved(exec, root, task))) continue;
-      status(`rebase onto ${task.mainBranch}, a merge ahead landed`);
-      const moved = await rebaseWorktree(exec, cleanup, root, task, config.protected);
-      if (moved) return moved;
-    }
-    return await turn();
-  } finally {
-    await leaveQueue(ticket);
-  }
+  if (conflicts) return { kind: "conflict", files: conflicts };
 
   /** The ticket's turn: rebase, merge gates, move the target. Again from the rebase when the target moved anyway. */
-  async function turn(): Promise<MergeData | string[] | GateFailure> {
+  const turn = async (): Promise<MergeResult> => {
     // Rebase, gates, move: again from the rebase while another merge lands on the main branch during the gates.
-    let merged: CommandResult;
+    let moveResult: CommandResult;
     let head: string;
     for (let attempt = 1; ; attempt++) {
       status(attempt === 1 ? `rebase onto ${task.mainBranch}` : `rebase onto ${task.mainBranch} again, it moved (attempt ${attempt})`);
       const conflicts = await rebaseWorktree(exec, cleanup, root, task, config.protected);
-      if (conflicts) return conflicts;
+      if (conflicts) return { kind: "conflict", files: conflicts };
       head = await git(exec, root, ["rev-parse", "HEAD"]);
       // Merge gates that are the round's gates, on the base the round passed them on (the squash keeps the tree), would
       // only repeat that run.
@@ -185,7 +179,7 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
         status(`merge gate ${argv.join(" ")}`);
         const gate = await exec(argv, { cwd: root });
         gates.push(gateData(round, "merge_gates", argv, gate));
-        if (!passed(gate)) return { argv, result: gate };
+        if (!passed(gate)) return { kind: "gate_failed", gate: { argv, result: gate } };
       }
       ontoBefore = onto;
 
@@ -196,46 +190,58 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
       // Each try takes the lock or gives up at once. The update is not killed by a cancel: a fast-forward cut in half
       // leaves the target's checkout partly updated. The wait between tries is, and a lock holder that hangs ends in a timeout.
       const deadline = Date.now() + LOCK_WAIT_MS;
-      merged = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
-      while (merged.exitCode === LOCK_BUSY_EXIT) {
+      moveResult = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
+      while (moveResult.exitCode === LOCK_BUSY_EXIT) {
         if (Date.now() > deadline) return fail(`the merge lock ${lock} stayed taken for ${LOCK_WAIT_MS / 1000} s`);
         status("wait for the merge lock");
         if ((await exec(["sleep", "1"], { cwd: root })).killed) return fail("cancelled while waiting for the merge lock");
-        merged = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
+        moveResult = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
       }
-      if (merged.exitCode === TARGET_MOVED_EXIT && attempt < MERGE_ATTEMPTS) continue;
-      if (!passed(merged)) return fail(`update of ${task.mainBranch} refused: ${tail(merged.output)}`);
+      if (moveResult.exitCode === TARGET_MOVED_EXIT && attempt < MERGE_ATTEMPTS) continue;
+      if (!passed(moveResult)) return fail(`update of ${task.mainBranch} refused: ${tail(moveResult.output)}`);
       break;
     }
-    const [before, moved] = merged.stdout.trim().split(" ");
+    const [before, moved] = moveResult.stdout.trim().split(" ");
     const commit = await git(cleanup, primary, ["rev-parse", `refs/heads/${task.mainBranch}`]);
     if (commit !== head) return fail(`${task.mainBranch} is at ${commit} after the update, not at the task's commit ${head}`);
 
     // Hooks install into the primary only: another worktree, or a target checked out nowhere, gets none.
-    if (moved !== "primary") return result(true, commit, null, false);
+    if (moved !== "primary") return merged(commit, null, false);
     const changed = (await git(cleanup, primary, ["diff", "--name-only", before, commit])).split("\n");
-    if (!changed.some((path) => LOCKFILES.includes(basename(path)))) return result(true, commit, null, false);
+    if (!changed.some((path) => config.lockfiles.includes(basename(path)))) return merged(commit, null, false);
     for (const argv of config.hooks.after_merge) {
       status(`after_merge ${argv.join(" ")}`);
       // Under the merge lock, so two tasks never install into the primary checkout at once. `-o`: a process the hook
       // leaves behind does not hold the lock.
       const hook = await exec(["flock", "-w", String(LOCK_WAIT_MS / 1000), "-o", lock, ...argv], { cwd: primary, timeoutMs: AFTER_MERGE_TIMEOUT_MS });
       gates.push(gateData(round, "after_merge", argv, hook));
-      if (!passed(hook)) return result(true, commit, `after_merge failed: ${argv.join(" ")}: ${tail(hook.output)}`, false);
+      if (!passed(hook)) return merged(commit, `after_merge failed: ${argv.join(" ")}: ${tail(hook.output)}`, false);
     }
-    return result(true, commit, null, true);
+    return merged(commit, null, true);
+  };
+
+  const ticket = await joinQueue(gitDir);
+  try {
+    for (let ahead = await queueAhead(ticket); ahead > 0; ahead = await queueAhead(ticket)) {
+      status(`queued for merge, ${ahead} ahead`);
+      if ((await exec(["sleep", String(QUEUE_POLL_MS / 1000)], { cwd: root })).killed) return fail("cancelled while queued for merge");
+      // A merge ahead landed: rebase onto it now, a conflict leaves the queue and goes to the coder.
+      if (!(await targetMoved(exec, root, task))) continue;
+      status(`rebase onto ${task.mainBranch}, a merge ahead landed`);
+      const moved = await rebaseWorktree(exec, cleanup, root, task, config.protected);
+      if (moved) return { kind: "conflict", files: moved };
+    }
+    return await turn();
+  } finally {
+    await leaveQueue(ticket);
   }
 }
 
 export async function mergeTask(input: MergeInput): Promise<MergeOutcome> {
   const gates: GateData[] = [];
-  const failed = (error: string): MergeData => ({ ok: false, commit: null, error, depsSynced: false });
   try {
-    const merge = await mergeWorktree(input, gates);
-    if (Array.isArray(merge)) return { gates, merge: failed(`rebase onto ${input.task.mainBranch} conflicts`), conflicts: merge, failedGate: null };
-    if ("argv" in merge) return { gates, merge: failed(`merge gate failed: ${merge.argv.join(" ")}`), conflicts: null, failedGate: merge };
-    return { gates, merge, conflicts: null, failedGate: null };
+    return { gates, result: await mergeWorktree(input, gates) };
   } catch (error) {
-    return { gates, merge: failed(error instanceof Error ? error.message : String(error)), conflicts: null, failedGate: null };
+    return { gates, result: { kind: "failed", merge: { ok: false, commit: null, error: errorText(error), depsSynced: false } } };
   }
 }

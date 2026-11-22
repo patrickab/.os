@@ -83,7 +83,10 @@ describe("parseStartPayload", () => {
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, branch: undefined } }), "settings.branch must be a non-empty string"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, branch: "" } }), "settings.branch must be a non-empty string"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, merge: "manual" } }), 'settings.merge must be "auto" or "review"'],
-    [JSON.stringify({ request: "r", title: "T", settings: { ...settings, maxRounds: 0 } }), "settings.maxRounds must be a positive integer"],
+    [JSON.stringify({ request: "r", title: "T", settings: { ...settings, maxRounds: 0 } }), "settings.maxRounds must be an integer from 1 to 20"],
+    [JSON.stringify({ request: "r", title: "T", settings: { ...settings, maxRounds: 21 } }), "settings.maxRounds must be an integer from 1 to 20"],
+    [JSON.stringify({ request: "r", title: "T", settings: { ...settings, maxRounds: undefined } }), "settings.maxRounds must be an integer from 1 to 20"],
+    [JSON.stringify({ request: "r", title: "T", settings: { ...settings, models: undefined } }), "settings.models must be an object"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, review: "yes" } }), "settings.review must be a boolean"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, models: { coder: "haiku" } } }), 'settings.models.coder must be "provider/model"'],
   ])("rejects %s", (text, message) => {

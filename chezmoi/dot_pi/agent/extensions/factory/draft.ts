@@ -11,6 +11,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isRecord } from "./util.ts";
 
 export type Argv = string[];
 
@@ -20,7 +21,7 @@ export interface RepoFiles {
   has(path: string): boolean;
 }
 
-export interface Draft {
+export interface ConfigDraft {
   /** The YAML text. */
   text: string;
   /** The files the gates come from, comma separated; empty when nothing was detected. */
@@ -54,10 +55,6 @@ const NODE_RUNNERS: [string, string][] = [["pnpm-lock.yaml", "pnpm"], ["yarn.loc
 const NODE_LINT = ["lint", "format:check", "check-format", "prettier:check"];
 const NODE_TYPES = ["typecheck", "type-check", "check-types", "tsc"];
 const NPM_DEFAULT_TEST = "no test specified";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function unique(commands: Argv[]): Argv[] {
   const seen: Argv[] = [];
@@ -225,7 +222,7 @@ export function detectGates(files: RepoFiles): Found {
 }
 
 /** `template` (a `factory.yaml` with `gates: []` and `merge_gates: []`) filled with what `files` declare. */
-export function draftFactoryYaml(files: RepoFiles, template: string): Draft {
+export function draftFactoryYaml(files: RepoFiles, template: string): ConfigDraft {
   const { source, gates, mergeGates } = detectGates(files);
   if (gates.length === 0 && mergeGates.length === 0) return { text: template, source: "", gates, mergeGates };
   const fill = (text: string, key: string, commands: Argv[]) =>
@@ -245,6 +242,6 @@ export function repoFiles(root: string): RepoFiles {
 export const TEMPLATE_PATH = join(import.meta.dirname, "factory.template.yaml");
 
 /** The draft for the checkout at `root`, from the template the plugin ships. */
-export function initDraft(root: string): Draft {
+export function initDraft(root: string): ConfigDraft {
   return draftFactoryYaml(repoFiles(root), readFileSync(TEMPLATE_PATH, "utf-8"));
 }

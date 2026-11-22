@@ -8,12 +8,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PROTECTED, protectedPaths, type FactoryConfig } from "./config.ts";
-import { abortLeftoverRebase, taskBase, taskDiff, taskGit } from "./git.ts";
-import { MERGE_ATTEMPTS, mergeTask, rebaseWorktree, type MergeInput } from "./merge.ts";
+import { abortLeftoverRebase, LOCKFILES, taskBase, taskDiff, taskGit } from "./git.ts";
+import { MERGE_ATTEMPTS, mergeTask, rebaseWorktree, type MergeInput, type MergeOutcome } from "./merge.ts";
 import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import { runRound, type PipelineSteps } from "./pipeline.ts";
 import { CommandRunner, type Exec } from "./run.ts";
-import type { Settings, Snapshot, Task } from "./state.ts";
+import type { MergeData, Settings, Snapshot, Task } from "./state.ts";
 
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
 process.env.GIT_CONFIG_SYSTEM = "/dev/null";
@@ -23,9 +23,15 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const runner = new CommandRunner();
 const settings: Settings = { branch: "main", merge: "auto", maxRounds: 3, review: false, models: {} };
-const noGates: FactoryConfig = { hooks: { after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED };
+const noGates: FactoryConfig = { hooks: { after_create: [], after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED, lockfiles: LOCKFILES };
 /** `noGates` whose round and merge gates are both `gates`, as a `factory.yaml` without `merge_gates` reads. */
 const gated = (gates: string[][], rest: Partial<FactoryConfig> = {}): FactoryConfig => ({ ...noGates, gates, merge_gates: gates, ...rest });
+
+/** The `factory-merge` data of a merge that merged or failed; throws for a conflict or a failed gate. */
+function mergeData(outcome: MergeOutcome): MergeData {
+  if (outcome.result.kind !== "merged" && outcome.result.kind !== "failed") throw new Error(`the merge ended ${outcome.result.kind}, no merge data`);
+  return outcome.result.merge;
+}
 
 function gitIn(repo: string, ...args: string[]): string {
   return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -186,6 +192,23 @@ describe("taskGit and taskDiff", () => {
     expect(diff.patch.endsWith("+lock body\n")).toBe(true);
   });
 
+  test("the patch puts the given lockfile names last, and only those", async () => {
+    const worktree = addWorktree("task-lc");
+    const task = await taskIn(worktree);
+    writeFileSync(join(worktree, "Cargo.lock"), "cargo body\n");
+    writeFileSync(join(worktree, "bun.lock"), "bun body\n");
+    writeFileSync(join(worktree, "zz.rs"), "fn main() {}\n");
+    const diff = await taskDiff(runner.run, worktree, task.baseSha, ["Cargo.lock"]);
+    const at = (text: string) => diff.patch.indexOf(text);
+    expect(at("b/bun.lock")).toBeGreaterThanOrEqual(0);
+    expect(at("b/bun.lock")).toBeLessThan(at("b/zz.rs"));
+    expect(at("b/zz.rs")).toBeLessThan(at("b/Cargo.lock"));
+    expect(diff.patch.endsWith("+cargo body\n")).toBe(true);
+    const none = await taskDiff(runner.run, worktree, task.baseSha, []);
+    expect(none.patch).toContain("+cargo body");
+    expect(none.patch.indexOf("b/Cargo.lock")).toBeLessThan(none.patch.indexOf("b/zz.rs"));
+  });
+
   test("the diff base follows a rebase onto the moved target branch", async () => {
     const worktree = addWorktree("task-b");
     const task = await taskIn(worktree);
@@ -208,11 +231,11 @@ describe("mergeTask", () => {
     gitIn(repo, "add", "-A");
     gitIn(repo, "commit", "--quiet", "-m", "other task");
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
-    const config = gated([["test", "-f", "other.txt"], ["test", "-f", "feature.txt"]], { hooks: { after_code: [], after_merge: [["touch", "synced"]] } });
+    const config = gated([["test", "-f", "other.txt"], ["test", "-f", "feature.txt"]], { hooks: { after_create: [], after_code: [], after_merge: [["touch", "synced"]] } });
 
     const outcome = await mergeTask(input(worktree, task, config, 2));
 
-    expect(outcome.merge).toEqual({ ok: true, commit: gitIn(repo, "rev-parse", "HEAD"), error: null, depsSynced: false });
+    expect(mergeData(outcome)).toEqual({ ok: true, commit: gitIn(repo, "rev-parse", "HEAD"), error: null, depsSynced: false });
     expect(outcome.gates.map((gate) => [gate.round, gate.phase, gate.argv.join(" "), gate.exitCode])).toEqual([
       [2, "merge_gates", "test -f other.txt", 0],
       [2, "merge_gates", "test -f feature.txt", 0],
@@ -228,26 +251,51 @@ describe("mergeTask", () => {
     const task = await taskIn(worktree);
     mkdirSync(join(worktree, "pi-host"));
     writeFileSync(join(worktree, "pi-host", "bun.lock"), "lock\n");
-    const config: FactoryConfig = { ...noGates, hooks: { after_code: [], after_merge: [["touch", "synced"]] } };
+    const config: FactoryConfig = { ...noGates, hooks: { after_create: [], after_code: [], after_merge: [["touch", "synced"]] } };
 
     const outcome = await mergeTask(input(worktree, task, config, 1));
 
-    expect(outcome.merge).toMatchObject({ ok: true, depsSynced: true, error: null });
+    expect(mergeData(outcome)).toMatchObject({ ok: true, depsSynced: true, error: null });
     expect(outcome.gates).toMatchObject([{ round: 1, phase: "after_merge", argv: ["touch", "synced"], exitCode: 0 }]);
     expect(existsSync(join(repo, "synced"))).toBe(true);
     expect(existsSync(join(worktree, "synced"))).toBe(false);
+  });
+
+  test("a merge that changes a lockfile named in config.lockfiles runs after_merge", async () => {
+    const worktree = addWorktree("task-lk");
+    const task = await taskIn(worktree);
+    writeFileSync(join(worktree, "Cargo.lock"), "lock\n");
+    const config: FactoryConfig = { ...noGates, lockfiles: ["Cargo.lock"], hooks: { after_create: [], after_code: [], after_merge: [["touch", "synced-cargo"]] } };
+
+    const outcome = await mergeTask(input(worktree, task, config, 1));
+
+    expect(mergeData(outcome)).toMatchObject({ ok: true, depsSynced: true, error: null });
+    expect(existsSync(join(repo, "synced-cargo"))).toBe(true);
+  });
+
+  test("a default lockfile no longer runs after_merge once config.lockfiles leaves it out", async () => {
+    const worktree = addWorktree("task-ln");
+    const task = await taskIn(worktree);
+    writeFileSync(join(worktree, "bun.lock"), "lock again\n");
+    const config: FactoryConfig = { ...noGates, lockfiles: ["Cargo.lock"], hooks: { after_create: [], after_code: [], after_merge: [["touch", "synced-bun"]] } };
+
+    const outcome = await mergeTask(input(worktree, task, config, 1));
+
+    expect(mergeData(outcome)).toMatchObject({ ok: true, depsSynced: false, error: null });
+    expect(outcome.gates).toEqual([]);
+    expect(existsSync(join(repo, "synced-bun"))).toBe(false);
   });
 
   test("a failing after_merge hook leaves the merge done and reports the hook", async () => {
     const worktree = addWorktree("task-e");
     const task = await taskIn(worktree);
     writeFileSync(join(worktree, "uv.lock"), "lock\n");
-    const config: FactoryConfig = { ...noGates, hooks: { after_code: [], after_merge: [["sh", "-c", "echo no network >&2; exit 1"]] } };
+    const config: FactoryConfig = { ...noGates, hooks: { after_create: [], after_code: [], after_merge: [["sh", "-c", "echo no network >&2; exit 1"]] } };
 
     const outcome = await mergeTask(input(worktree, task, config, 1));
 
-    expect(outcome.merge).toMatchObject({ ok: true, depsSynced: false, commit: gitIn(repo, "rev-parse", "HEAD") });
-    expect(outcome.merge.error).toContain("after_merge failed: sh -c echo no network >&2; exit 1: no network");
+    expect(mergeData(outcome)).toMatchObject({ ok: true, depsSynced: false, commit: gitIn(repo, "rev-parse", "HEAD") });
+    expect(mergeData(outcome).error).toContain("after_merge failed: sh -c echo no network >&2; exit 1: no network");
     expect(outcome.gates).toMatchObject([{ phase: "after_merge", exitCode: 1, outputTail: "no network\n" }]);
   });
 
@@ -263,7 +311,7 @@ describe("mergeTask", () => {
 
     const outcome = await mergeTask(input(worktree, task, config, 1));
 
-    expect(outcome.merge).toMatchObject({ ok: true, commit: gitIn(repo, "rev-parse", "main") });
+    expect(mergeData(outcome)).toMatchObject({ ok: true, commit: gitIn(repo, "rev-parse", "main") });
     expect(outcome.gates.map((gate) => gate.phase)).toEqual(["merge_gates", "merge_gates"]);
     expect(gitIn(repo, "log", "--format=%s")).toBe(`${task.title}\nraced\nearlier\nbase`);
   });
@@ -278,8 +326,8 @@ describe("mergeTask", () => {
 
     const outcome = await mergeTask(input(worktree, task, config, 1));
 
-    expect(outcome.merge).toMatchObject({ ok: false, commit: null, depsSynced: false });
-    expect(outcome.merge.error).toContain("update of main refused: main moved past the task's base");
+    expect(mergeData(outcome)).toMatchObject({ ok: false, commit: null, depsSynced: false });
+    expect(mergeData(outcome).error).toContain("update of main refused: main moved past the task's base");
     expect(outcome.gates).toHaveLength(MERGE_ATTEMPTS);
     expect(gitIn(repo, "log", "--format=%s")).toBe(`${"raced\n".repeat(MERGE_ATTEMPTS)}earlier\nbase`);
     expect(existsSync(join(repo, "feature.txt"))).toBe(false);
@@ -293,8 +341,7 @@ describe("mergeTask", () => {
     writeFileSync(join(worktree, "README.md"), "task version\n");
 
     const conflict = await mergeTask(input(worktree, task, noGates));
-    expect(conflict.merge.ok).toBe(false);
-    expect(conflict.conflicts).toEqual(["README.md"]);
+    expect(conflict.result).toEqual({ kind: "conflict", files: ["README.md"] });
     expect(gitIn(worktree, "status", "--porcelain")).toBe("");
     expect(gitIn(worktree, "symbolic-ref", "--short", "HEAD")).toBe("task-g");
     expect(readFileSync(join(worktree, "README.md"), "utf8")).toBe("task version\n");
@@ -303,9 +350,8 @@ describe("mergeTask", () => {
     gitIn(repo, "commit", "--quiet", "--allow-empty", "-m", "moved");
     writeFileSync(join(other, "feature.txt"), "feature\n");
     const gateFailed = await mergeTask(input(other, await taskIn(other), gated([["false"]])));
-    expect(gateFailed.merge).toMatchObject({ ok: false, error: "merge gate failed: false" });
     expect(gateFailed.gates).toHaveLength(1);
-    expect(gateFailed.failedGate).toMatchObject({ argv: ["false"], result: { exitCode: 1 } });
+    expect(gateFailed.result).toMatchObject({ kind: "gate_failed", gate: { argv: ["false"], result: { exitCode: 1 } } });
     // The rebase stays: the coder fixes the change on top of main.
     expect(gitIn(other, "merge-base", "--is-ancestor", "main", "HEAD")).toBe("");
     expect(gitIn(repo, "log", "--format=%s")).toBe("moved\nmain edit\nbase");
@@ -317,11 +363,11 @@ describe("mergeTask", () => {
     gitIn(repo, "commit", "--quiet", "--allow-empty", "-m", "main moved");
     gitIn(repo, "switch", "--quiet", "-c", "elsewhere");
     writeFileSync(join(worktree, "uv.lock"), "lock\n");
-    const config: FactoryConfig = { ...noGates, hooks: { after_code: [], after_merge: [["touch", "hook-ran"]] } };
+    const config: FactoryConfig = { ...noGates, hooks: { after_create: [], after_code: [], after_merge: [["touch", "hook-ran"]] } };
 
     const outcome = await mergeTask(input(worktree, task, config));
 
-    expect(outcome.merge).toMatchObject({ ok: true, error: null, depsSynced: false });
+    expect(mergeData(outcome)).toMatchObject({ ok: true, error: null, depsSynced: false });
     expect(gitIn(repo, "rev-parse", "main")).toBe(gitIn(worktree, "rev-parse", "HEAD"));
     expect(gitIn(repo, "log", "--format=%s", "main")).toBe("Task title\nmain moved\nbase");
     expect(gitIn(repo, "symbolic-ref", "--short", "HEAD")).toBe("elsewhere");
@@ -338,11 +384,11 @@ describe("mergeTask", () => {
     gitIn(repo, "worktree", "add", "--quiet", other, "main");
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
     writeFileSync(join(worktree, "uv.lock"), "lock\n");
-    const config: FactoryConfig = { ...noGates, hooks: { after_code: [], after_merge: [["touch", "hook-ran"]] } };
+    const config: FactoryConfig = { ...noGates, hooks: { after_create: [], after_code: [], after_merge: [["touch", "hook-ran"]] } };
 
     const outcome = await mergeTask(input(worktree, task, config));
 
-    expect(outcome.merge).toMatchObject({ ok: true, commit: gitIn(worktree, "rev-parse", "HEAD"), error: null, depsSynced: false });
+    expect(mergeData(outcome)).toMatchObject({ ok: true, commit: gitIn(worktree, "rev-parse", "HEAD"), error: null, depsSynced: false });
     expect(gitIn(other, "log", "--format=%s")).toBe("Task title\nbase");
     expect(readFileSync(join(other, "feature.txt"), "utf8")).toBe("feature\n");
     expect(gitIn(other, "status", "--porcelain")).toBe("");
@@ -362,9 +408,9 @@ describe("mergeTask", () => {
 
     const outcome = await mergeTask(input(worktree, task, noGates));
 
-    expect(outcome.merge).toMatchObject({ ok: false, commit: null });
-    expect(outcome.merge.error).toContain("update of main refused");
-    expect(outcome.merge.error).toContain("README.md");
+    expect(mergeData(outcome)).toMatchObject({ ok: false, commit: null });
+    expect(mergeData(outcome).error).toContain("update of main refused");
+    expect(mergeData(outcome).error).toContain("README.md");
     expect(readFileSync(join(other, "README.md"), "utf8")).toBe("user work in the other worktree\n");
     expect(gitIn(repo, "log", "--format=%s", "main")).toBe("base");
   });
@@ -383,8 +429,8 @@ describe("mergeTask", () => {
     const one = await mergeTask(input(first, firstTask, noGates));
     const two = await mergeTask(input(second, secondTask, noGates));
 
-    expect(one.merge.ok).toBe(true);
-    expect(two.merge).toMatchObject({ ok: true, commit: gitIn(other, "rev-parse", "HEAD") });
+    expect(mergeData(one).ok).toBe(true);
+    expect(mergeData(two)).toMatchObject({ ok: true, commit: gitIn(other, "rev-parse", "HEAD") });
     expect(gitIn(other, "log", "--format=%s")).toBe("Second\nFirst\nbase");
     expect(readFileSync(join(other, "first.txt"), "utf8")).toBe("first\n");
     expect(readFileSync(join(other, "second.txt"), "utf8")).toBe("second\n");
@@ -398,7 +444,7 @@ describe("mergeTask: what a merge must not get wrong", () => {
     const task = await taskIn(worktree);
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
     const outcome = await mergeTask(input(worktree, task, gated([["false"]])));
-    expect(outcome).toMatchObject({ gates: [], merge: { ok: true, commit: gitIn(repo, "rev-parse", "HEAD") } });
+    expect(outcome).toMatchObject({ gates: [], result: { kind: "merged", merge: { ok: true, commit: gitIn(repo, "rev-parse", "HEAD") } } });
     expect(gitIn(repo, "log", "--format=%s")).toBe("Task title\nbase");
   });
 
@@ -418,7 +464,8 @@ describe("mergeTask: what a merge must not get wrong", () => {
 
     const cancelled = await mergeTask({ ...input(worktree, task, noGates), exec, cleanup: own.cleanup });
 
-    expect(cancelled.merge.ok).toBe(false);
+    // Nothing merged: the rebase conflicted (or was killed), no matter how the result reports it.
+    expect(cancelled.result.kind).not.toBe("merged");
     expect(existsSync(gitIn(worktree, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge"))).toBe(false);
     expect(gitIn(worktree, "symbolic-ref", "--short", "HEAD")).toBe("task-l");
 
@@ -427,7 +474,7 @@ describe("mergeTask: what a merge must not get wrong", () => {
     writeFileSync(join(worktree, "README.md"), "main and task version\n");
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
     const retried = await mergeTask(input(worktree, task, noGates));
-    expect(retried.merge).toMatchObject({ ok: true, commit: gitIn(repo, "rev-parse", "HEAD") });
+    expect(mergeData(retried)).toMatchObject({ ok: true, commit: gitIn(repo, "rev-parse", "HEAD") });
     expect(readFileSync(join(repo, "feature.txt"), "utf8")).toBe("feature\n");
   });
 
@@ -458,7 +505,7 @@ describe("mergeTask: what a merge must not get wrong", () => {
 
     const outcome = await mergeTask(input(worktree, task, noGates));
 
-    expect(outcome.merge.error).toBe("a git operation is in progress in the task checkout (rebase-merge)");
+    expect(mergeData(outcome).error).toBe("a git operation is in progress in the task checkout (rebase-merge)");
     expect(readFileSync(join(worktree, "README.md"), "utf8")).toBe("resolved\n");
     expect(readFileSync(join(worktree, "factory.yaml"), "utf8")).toBe("gates: [[true]]\n");
     expect(gitIn(repo, "log", "--format=%s", "main")).toBe("main edit\nbase");
@@ -479,7 +526,7 @@ describe("mergeTask: what a merge must not get wrong", () => {
     holder.kill();
     await holder.exited;
     expect(Date.now() - started).toBeLessThan(4000);
-    expect(outcome.merge).toMatchObject({ ok: false, error: "cancelled while waiting for the merge lock" });
+    expect(mergeData(outcome)).toMatchObject({ ok: false, error: "cancelled while waiting for the merge lock" });
     expect(intents).toEqual([{ commit: gitIn(worktree, "rev-parse", "HEAD"), before: task.baseSha }]);
     await Bun.sleep(300);
     expect(gitIn(repo, "rev-parse", "main")).toBe(task.baseSha);
@@ -498,7 +545,7 @@ describe("mergeTask: what a merge must not get wrong", () => {
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
     expect((await taskDiff(runner.run, worktree, task.baseSha)).paths).toEqual(["feature.txt"]);
     const outcome = await mergeTask(input(worktree, task, noGates));
-    expect(outcome.merge.ok).toBe(true);
+    expect(mergeData(outcome).ok).toBe(true);
     expect(gitIn(repo, "show", "--format=", "--name-only", "main")).toBe("feature.txt");
   });
 
@@ -512,7 +559,7 @@ describe("mergeTask: what a merge must not get wrong", () => {
 
     const outcome = await mergeTask(input(worktree, task, config));
 
-    expect(outcome.merge).toMatchObject({ ok: true, commit: gitIn(worktree, "rev-parse", "HEAD"), depsSynced: false });
+    expect(mergeData(outcome)).toMatchObject({ ok: true, commit: gitIn(worktree, "rev-parse", "HEAD"), depsSynced: false });
     expect(gitIn(repo, "rev-parse", "main^")).toBe(main);
     expect(gitIn(repo, "rev-parse", "wip")).toBe(main);
     expect(existsSync(join(repo, "feature.txt"))).toBe(false);
@@ -524,8 +571,8 @@ describe("mergeTask: what a merge must not get wrong", () => {
     writeFileSync(join(worktree, "README.md"), "task version\n");
     writeFileSync(join(repo, "README.md"), "user work in the primary\n");
     const outcome = await mergeTask(input(worktree, task, noGates));
-    expect(outcome.merge.ok).toBe(false);
-    expect(outcome.merge.error).toContain("update of main refused");
+    expect(mergeData(outcome).ok).toBe(false);
+    expect(mergeData(outcome).error).toContain("update of main refused");
     expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("user work in the primary\n");
     expect(gitIn(repo, "log", "--format=%s")).toBe("base");
   });
@@ -536,10 +583,10 @@ describe("mergeTask: what a merge must not get wrong", () => {
     gitIn(worktree, "switch", "--quiet", "-c", "fix-x");
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
     const onOther = await mergeTask(input(worktree, task, noGates));
-    expect(onOther.merge).toMatchObject({ ok: false, commit: null, error: "the task checkout is on fix-x, not on task-o" });
+    expect(mergeData(onOther)).toMatchObject({ ok: false, commit: null, error: "the task checkout is on fix-x, not on task-o" });
     gitIn(worktree, "switch", "--quiet", "--detach");
     const detached = await mergeTask(input(worktree, task, noGates));
-    expect(detached.merge.error).toBe("the task checkout is on a detached HEAD, not on task-o");
+    expect(mergeData(detached).error).toBe("the task checkout is on a detached HEAD, not on task-o");
     expect(gitIn(worktree, "status", "--porcelain")).toBe("?? feature.txt");
     expect(gitIn(repo, "log", "--format=%s")).toBe("base");
   });
@@ -609,8 +656,8 @@ describe("merge queue", () => {
     // Its gate proves the order: it only passes on top of the first merge.
     const second = mergeTask({ ...input(two, taskTwo, gated([["test", "-f", "one.txt"]])), status: (text) => statuses.push(text) });
 
-    expect((await first).merge).toMatchObject({ ok: true });
-    expect((await second).merge).toMatchObject({ ok: true });
+    expect(mergeData(await first)).toMatchObject({ ok: true });
+    expect(mergeData(await second)).toMatchObject({ ok: true });
     expect(statuses).toContain("queued for merge, 1 ahead");
     expect(gitIn(repo, "log", "--format=%s")).toBe("two\none\nbase");
     expect(readdirSync(join(repo, ".git", "factory-merge-queue"))).toEqual([]);
@@ -628,9 +675,9 @@ describe("merge queue", () => {
     await Bun.sleep(500);
     const second = mergeTask(input(two, taskTwo, gated([["true"]])));
 
-    expect((await first).merge).toMatchObject({ ok: true });
+    expect(mergeData(await first)).toMatchObject({ ok: true });
     const outcome = await second;
-    expect(outcome.conflicts).toEqual(["README.md"]);
+    expect(outcome.result).toEqual({ kind: "conflict", files: ["README.md"] });
     expect(outcome.gates).toEqual([]);
     expect(gitIn(repo, "log", "--format=%s")).toBe("one\nbase");
     expect(readdirSync(join(repo, ".git", "factory-merge-queue"))).toEqual([]);

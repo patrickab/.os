@@ -7,8 +7,11 @@
  * - Provides the round budget, the `/factory start` payload check and the feedback texts the coder reads
  */
 import type { CommandResult } from "./run.ts";
+import { isRecord } from "./util.ts";
 
 export type State = "running" | "waiting_approve" | "blocked" | "merging" | "done" | "cancelled";
+/** A task in one of these states does nothing until someone sends it a command or a message. */
+export const RESTING_STATES: readonly State[] = ["waiting_approve", "blocked", "done", "cancelled"];
 export type GatePhase = "hooks" | "gates" | "merge_gates" | "after_merge";
 export type Trigger = "start" | "hooks" | "gates" | "review" | "protected" | "message" | "retry" | "conflict";
 export type Severity = "blocker" | "major" | "minor";
@@ -36,6 +39,16 @@ export interface Task extends StartPayload {
   mainBranch: string;
   /** HEAD at start. */
   baseSha: string;
+  /** `PROTOCOL_VERSION` of the plugin that started the task. Absent on tasks started before it was written. */
+  protocol?: number;
+}
+
+/** The version of the entry protocol, written into every new `factory-task` entry. */
+export const PROTOCOL_VERSION = 2;
+
+export interface RoundData {
+  round: number;
+  trigger: Trigger;
 }
 
 export interface GateData {
@@ -120,11 +133,26 @@ export const RETRY_PROMPT = "Continue the task. If a problem was reported above,
 const MERGE_FAILED_PROMPT_START = "The merge of the task failed: ";
 export const OUTPUT_TAIL_CHARS = 4000;
 
-export interface CustomDraft {
-  type: "custom";
-  customType: string;
-  data: unknown;
+/** The data of each `custom` entry the extension writes, by its `customType`. */
+export interface EntryData {
+  "factory-task": Task;
+  "factory-round": RoundData;
+  "factory-gate": GateData;
+  "factory-review": ReviewData;
+  "factory-merge-intent": MergeIntentData;
+  "factory-merge": MergeData;
+  "factory-state": StateData;
 }
+
+export type EntryType = keyof EntryData;
+
+export interface CustomEntry<K extends EntryType> {
+  type: "custom";
+  customType: K;
+  data: EntryData[K];
+}
+
+export type EntryDraft = { [K in EntryType]: CustomEntry<K> }[EntryType];
 
 export interface FeedbackDraft {
   type: "custom_message";
@@ -134,39 +162,42 @@ export interface FeedbackDraft {
   details: { round: number; trigger: Trigger };
 }
 
-export type Draft = CustomDraft | FeedbackDraft;
+export type Draft = EntryDraft | FeedbackDraft;
 
 const RUN_TRIGGERS: readonly Trigger[] = ["start", "message", "retry"];
 
-export function applyEntry(snapshot: Snapshot | undefined, customType: string, data: unknown): Snapshot | undefined {
-  if (customType === "factory-task") {
-    return { task: data as Task, state: "running", round: 0, runFirstRound: 1, reason: "", mergeIntent: null, mergeError: null };
-  }
-  if (!snapshot) return undefined;
-  if (customType === "factory-round") {
-    const { round, trigger } = data as { round: number; trigger: Trigger };
+type Reducer<K extends EntryType> = (snapshot: Snapshot | undefined, data: EntryData[K]) => Snapshot | undefined;
+
+const REDUCERS: { [K in EntryType]: Reducer<K> } = {
+  "factory-task": (_snapshot, task) => ({ task, state: "running", round: 0, runFirstRound: 1, reason: "", mergeIntent: null, mergeError: null }),
+  "factory-round": (snapshot, { round, trigger }) => {
+    if (!snapshot) return undefined;
     const opensRun = RUN_TRIGGERS.includes(trigger) || (trigger === "conflict" && snapshot.state !== "running" && snapshot.state !== "merging");
     return { ...snapshot, round, runFirstRound: opensRun ? round : snapshot.runFirstRound };
-  }
-  if (customType === "factory-state") {
-    const { state, reason } = data as StateData;
-    return { ...snapshot, state, reason, mergeIntent: null };
-  }
-  if (customType === "factory-merge-intent") return { ...snapshot, mergeIntent: data as MergeIntentData };
-  if (customType === "factory-merge") {
-    const { ok, error } = data as MergeData;
-    return { ...snapshot, mergeIntent: null, mergeError: ok ? null : error };
-  }
-  return snapshot;
+  },
+  "factory-gate": (snapshot) => snapshot,
+  "factory-review": (snapshot) => snapshot,
+  "factory-merge-intent": (snapshot, mergeIntent) => snapshot && { ...snapshot, mergeIntent },
+  "factory-merge": (snapshot, { ok, error }) => snapshot && { ...snapshot, mergeIntent: null, mergeError: ok ? null : error },
+  "factory-state": (snapshot, { state, reason }) => snapshot && { ...snapshot, state, reason, mergeIntent: null },
+};
+
+export function isEntryType(value: string): value is EntryType {
+  return Object.hasOwn(REDUCERS, value);
 }
 
-/** The task of a session branch, or undefined when the branch holds no `factory-task` entry. */
+export function applyEntry<K extends EntryType>(snapshot: Snapshot | undefined, customType: K, data: EntryData[K]): Snapshot | undefined {
+  const reduce: Reducer<K> = REDUCERS[customType];
+  return reduce(snapshot, data);
+}
+
+/** The task of a session branch, or undefined when the branch holds no `factory-task` entry. Unknown `factory-*` entries are skipped. */
 export function rebuild(entries: Iterable<{ type: string }>): Snapshot | undefined {
   let snapshot: Snapshot | undefined;
   for (const entry of entries) {
     if (entry.type !== "custom") continue;
     const { customType, data } = entry as { type: string; customType?: unknown; data?: unknown };
-    if (typeof customType === "string" && customType.startsWith("factory-")) snapshot = applyEntry(snapshot, customType, data);
+    if (typeof customType === "string" && isEntryType(customType)) snapshot = applyEntry(snapshot, customType, data as EntryData[EntryType]);
   }
   return snapshot;
 }
@@ -217,12 +248,12 @@ export function wasInterrupted(snapshot: Snapshot): boolean {
   return snapshot.state === "running" || snapshot.state === "merging";
 }
 
-export function customDraft(customType: string, data: unknown): CustomDraft {
+export function customDraft<K extends EntryType>(customType: K, data: EntryData[K]): CustomEntry<K> {
   return { type: "custom", customType, data };
 }
 
-export function stateDraft(state: State, round: number, reason: string): CustomDraft {
-  return customDraft("factory-state", { state, round, reason } satisfies StateData);
+export function stateDraft(state: State, round: number, reason: string): CustomEntry<"factory-state"> {
+  return customDraft("factory-state", { state, round, reason });
 }
 
 export function feedbackDraft(round: number, trigger: Trigger, content: string): FeedbackDraft {
@@ -277,8 +308,48 @@ export function reviewFeedback(round: number, findings: Finding[]): string {
   return `Round ${round}: the review found problems. Fix every blocker and major finding, then stop.\n\n${lines.join("\n")}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+/** The highest `maxRounds` a task may run with. */
+export const MAX_ROUNDS_LIMIT = 20;
+/** The roles `Settings.models` sets a model for. */
+export const ROLES = ["coder", "reviewer"] as const;
+
+/**
+ * The settings keys of `raw`, checked, unknown keys dropped; an absent key stays absent. Shared by the `/factory start`
+ * payload and the stored settings (`settings.ts`). Throws an `Error` naming the first wrong key after `prefix`.
+ */
+export function parseSettingsFields(raw: Record<string, unknown>, prefix = ""): Partial<Settings> {
+  const fields: Partial<Settings> = {};
+  const { branch, merge, maxRounds, review, models } = raw;
+  if (branch !== undefined) {
+    if (typeof branch !== "string" || branch.trim() === "") throw new Error(`${prefix}branch must be a non-empty string`);
+    fields.branch = branch;
+  }
+  if (merge !== undefined) {
+    if (merge !== "auto" && merge !== "review") throw new Error(`${prefix}merge must be "auto" or "review"`);
+    fields.merge = merge;
+  }
+  if (maxRounds !== undefined) {
+    if (typeof maxRounds !== "number" || !Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > MAX_ROUNDS_LIMIT) {
+      throw new Error(`${prefix}maxRounds must be an integer from 1 to ${MAX_ROUNDS_LIMIT}`);
+    }
+    fields.maxRounds = maxRounds;
+  }
+  if (review !== undefined) {
+    if (typeof review !== "boolean") throw new Error(`${prefix}review must be a boolean`);
+    fields.review = review;
+  }
+  if (models !== undefined) {
+    if (!isRecord(models)) throw new Error(`${prefix}models must be an object`);
+    const roleModels: Settings["models"] = {};
+    for (const role of ROLES) {
+      const model = models[role];
+      if (model === undefined) continue;
+      if (typeof model !== "string" || !model.includes("/")) throw new Error(`${prefix}models.${role} must be "provider/model"`);
+      roleModels[role] = model;
+    }
+    fields.models = roleModels;
+  }
+  return fields;
 }
 
 /** The payload of `/factory start <json>`. Throws an `Error` that names the first wrong field. */
@@ -294,18 +365,12 @@ export function parseStartPayload(text: string): StartPayload {
   if (typeof request !== "string" || request.trim() === "") throw new Error("request must be a non-empty string");
   if (typeof title !== "string" || title.trim() === "") throw new Error("title must be a non-empty string");
   if (!isRecord(settings)) throw new Error("settings must be an object");
-  const { branch, merge, maxRounds, review, models } = settings;
-  if (typeof branch !== "string" || branch.trim() === "") throw new Error("settings.branch must be a non-empty string");
-  if (merge !== "auto" && merge !== "review") throw new Error('settings.merge must be "auto" or "review"');
-  if (typeof maxRounds !== "number" || !Number.isInteger(maxRounds) || maxRounds < 1) throw new Error("settings.maxRounds must be a positive integer");
-  if (typeof review !== "boolean") throw new Error("settings.review must be a boolean");
-  if (!isRecord(models)) throw new Error("settings.models must be an object");
-  const roleModels: Settings["models"] = {};
-  for (const role of ["coder", "reviewer"] as const) {
-    const model = models[role];
-    if (model === undefined) continue;
-    if (typeof model !== "string" || !model.includes("/")) throw new Error(`settings.models.${role} must be "provider/model"`);
-    roleModels[role] = model;
-  }
-  return { request, title, settings: { branch, merge, maxRounds, review, models: roleModels } };
+  const { branch, merge, maxRounds, review, models } = parseSettingsFields(settings, "settings.");
+  // Every key is required here: the absent ones get the message of a wrong one.
+  if (branch === undefined) throw new Error("settings.branch must be a non-empty string");
+  if (merge === undefined) throw new Error('settings.merge must be "auto" or "review"');
+  if (maxRounds === undefined) throw new Error(`settings.maxRounds must be an integer from 1 to ${MAX_ROUNDS_LIMIT}`);
+  if (review === undefined) throw new Error("settings.review must be a boolean");
+  if (models === undefined) throw new Error("settings.models must be an object");
+  return { request, title, settings: { branch, merge, maxRounds, review, models } };
 }

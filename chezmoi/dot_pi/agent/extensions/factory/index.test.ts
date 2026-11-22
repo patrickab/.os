@@ -63,10 +63,12 @@ function session(cwd: string, branch: Entry[] = []) {
   const notes: string[] = [];
   const statuses: [string, string | undefined][] = [];
   const flags = { idle: true, pending: false, aborts: 0 };
+  const tools: string[] = [];
   const pi = {
     registerCommand: (_name: string, options: { handler: typeof commandHandler }) => {
       commandHandler = options.handler;
     },
+    registerTool: (tool: { name: string }) => tools.push(tool.name),
     on: (name: string, handler: (event: any, ctx: any) => unknown) => handlers.set(name, handler),
     appendEntry: (customType: string, data: unknown) => entries.push({ customType, data }),
     sendUserMessage: (text: string) => messages.push(text),
@@ -93,6 +95,7 @@ function session(cwd: string, branch: Entry[] = []) {
   const states = () => entries.filter((entry) => entry.customType === "factory-state").map((entry) => `${entry.data.state}/${entry.data.reason}`);
   return {
     entries,
+    tools,
     messages,
     sent,
     notes,
@@ -116,6 +119,12 @@ function session(cwd: string, branch: Entry[] = []) {
     },
   };
 }
+
+describe("wiring", () => {
+  test("registers the factory tool", () => {
+    expect(session(repo).tools).toEqual(["factory"]);
+  });
+});
 
 describe("/factory init", () => {
   test("writes the draft into the main checkout, uncommitted, from a worktree too, and never overwrites", async () => {
@@ -174,7 +183,7 @@ describe("/factory start", () => {
     await pi.start();
     await pi.start();
     expect(pi.entries.map((entry) => entry.customType)).toEqual(["factory-task", "factory-round", "factory-state"]);
-    expect(pi.of("factory-task")[0]).toMatchObject({ branch: "task", mainBranch: "main", baseSha: gitIn(repo, "rev-parse", "HEAD") });
+    expect(pi.of("factory-task")[0]).toMatchObject({ branch: "task", mainBranch: "main", baseSha: gitIn(repo, "rev-parse", "HEAD"), protocol: 2 });
     expect(pi.messages).toEqual(["Add task.txt"]);
     expect(pi.notes).toEqual(["error: factory: this session already holds a task"]);
   });

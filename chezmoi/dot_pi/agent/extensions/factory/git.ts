@@ -16,21 +16,24 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Exec } from "./run.ts";
 import type { Task } from "./state.ts";
+import { outputTail } from "./util.ts";
 
-const ERROR_TAIL_CHARS = 1000;
 /** Upper bound of what one git call may print: path lists and file contents, never a whole patch. */
 const GIT_STDOUT_MAX_CHARS = 4_000_000;
 /** What a diff keeps of its patch. The review caps it again, far lower. */
 const PATCH_KEEP_CHARS = 1_000_000;
 
-/** Their bodies are noise in a review and go last in a patch. A change to one makes a merge run `hooks.after_merge`. */
+/**
+ * The default of `factory.yaml` `lockfiles`: their bodies are noise in a review and go last in a patch. A change to one
+ * makes a merge run `hooks.after_merge`.
+ */
 export const LOCKFILES = ["uv.lock", "package-lock.json", "bun.lock", "bun.lockb"];
 
 /** Stdout of `git <args>` in `cwd`, trimmed. Throws with the end of the output when git fails. */
 export async function git(exec: Exec, cwd: string, args: string[], env?: Record<string, string>): Promise<string> {
   const result = await exec(["git", ...args], { cwd, env, maxStdoutChars: GIT_STDOUT_MAX_CHARS });
   if (result.exitCode !== 0 || result.killed) {
-    throw new Error(`git ${args.join(" ")}: ${result.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
+    throw new Error(`git ${args.join(" ")}: ${outputTail(result.output)}`);
   }
   if (result.stdoutTruncated) throw new Error(`git ${args.join(" ")}: more than ${GIT_STDOUT_MAX_CHARS} characters of output`);
   return result.stdout.trim();
@@ -104,7 +107,7 @@ export async function taskGit(exec: Exec, cwd: string, target: string): Promise<
 async function isAncestor(exec: Exec, root: string, ancestor: string, commit: string): Promise<boolean> {
   const result = await exec(["git", "merge-base", "--is-ancestor", ancestor, commit], { cwd: root });
   if (result.exitCode === 0 || result.exitCode === 1) return result.exitCode === 0 && !result.killed;
-  throw new Error(`git merge-base --is-ancestor ${ancestor} ${commit}: ${result.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
+  throw new Error(`git merge-base --is-ancestor ${ancestor} ${commit}: ${outputTail(result.output)}`);
 }
 
 /**
@@ -159,18 +162,18 @@ export interface TaskDiff {
   patch: string;
 }
 
-/** The working tree of `root` against `base`, untracked files included. */
-export async function taskDiff(exec: Exec, root: string, base: string): Promise<TaskDiff> {
+/** The working tree of `root` against `base`, untracked files included. Files named in `lockfiles` go last in the patch. */
+export async function taskDiff(exec: Exec, root: string, base: string, lockfiles: readonly string[] = LOCKFILES): Promise<TaskDiff> {
   const tree = await snapshotTree(exec, root);
   const paths = nulList(await git(exec, root, ["diff", "--no-renames", "--name-only", "-z", base, tree]));
   // Fixed prefixes and no external diff tool: the patch must not depend on the user's git config.
   const patchOf = async (pathspecs: string[]) => {
     const argv = ["git", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", base, tree, "--", ...pathspecs];
     const result = await exec(argv, { cwd: root, maxStdoutChars: PATCH_KEEP_CHARS });
-    if (result.exitCode !== 0 || result.killed) throw new Error(`git diff: ${result.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
+    if (result.exitCode !== 0 || result.killed) throw new Error(`git diff: ${outputTail(result.output)}`);
     return result.stdout;
   };
-  const source = await patchOf([".", ...LOCKFILES.map((name) => `:(exclude,glob)**/${name}`)]);
-  const locks = await patchOf(LOCKFILES.map((name) => `:(glob)**/${name}`));
+  const source = await patchOf([".", ...lockfiles.map((name) => `:(exclude,glob)**/${name}`)]);
+  const locks = lockfiles.length === 0 ? "" : await patchOf(lockfiles.map((name) => `:(glob)**/${name}`));
   return { base, paths, patch: source + locks };
 }

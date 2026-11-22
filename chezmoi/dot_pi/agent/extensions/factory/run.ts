@@ -3,7 +3,7 @@
  *
  * - Consumes an argv and a cwd
  * - Provides `CommandRunner`: `run` starts commands that `cancel()` kills as whole groups, `cleanup` starts the ones a
- *   cancel must not stop
+ *   cancel must not stop; `runCommand` runs one outside any `CommandRunner`
  * - Memory per command is bounded: the end of the output, and stdout only as far as the caller asks for it
  * - `pi.exec` is not used: it reports a killed command as exit 0 and kills only the direct child
  */
@@ -121,6 +121,9 @@ function spawnCommand(argv: string[], options: CommandOptions, kills?: Set<() =>
   });
 }
 
+/** Runs one command in its own process group, nothing can cancel it. For callers that need no `CommandRunner`. */
+export const runCommand: Exec = (argv, options) => spawnCommand(argv, options);
+
 export class CommandRunner {
   private readonly kills = new Set<() => void>();
   private cancelRequested = false;
@@ -150,5 +153,5 @@ export class CommandRunner {
    * Runs a command that `cancel()` neither prevents nor kills: cleanup that has to happen after a cancel
    * (`git rebase --abort`, bringing an index back in line), and short steps that must not be cut in half.
    */
-  cleanup: Exec = (argv, options) => spawnCommand(argv, options);
+  cleanup: Exec = runCommand;
 }

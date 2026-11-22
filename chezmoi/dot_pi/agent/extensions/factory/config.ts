@@ -1,30 +1,34 @@
 /**
  * The repo's side of a factory task.
  *
- * - Consumes `factory.yaml` (the keys the pipeline runs: `hooks.after_code`, `hooks.after_merge`, `gates`,
- *   `merge_gates`, `protected`)
+ * - Consumes `factory.yaml` (the keys the plugin runs: `hooks.after_create`, `hooks.after_code`, `hooks.after_merge`,
+ *   `gates`, `merge_gates`, `protected`, `lockfiles`)
  *   and the role prompts `.factory/agents/<role>.md`, all as the task's base commit holds them. The working tree is
  *   the coder's to edit, so it is never the source of the rules the coder is held to
- * - Provides `TaskFiles` (`loadTaskFiles`), `FactoryConfig`, the protected-path match and the role prompt text
- * - `hooks.after_create` and `preview` belong to the backend and are not read here
+ * - Provides `TaskFiles` (`loadTaskFiles`), `FactoryConfig` (`parseFactoryYaml` for a file read elsewhere: `launch.ts`
+ *   runs `hooks.after_create` from the new worktree's copy), the protected-path match and the role prompt text
+ * - `preview` belongs to the backend and is not read here
  */
-import { git } from "./git.ts";
+import { git, LOCKFILES } from "./git.ts";
 import type { Exec } from "./run.ts";
+import { errorText, isRecord } from "./util.ts";
 
 export interface FactoryConfig {
-  hooks: { after_code: string[][]; after_merge: string[][] };
+  /** `after_create`: once, in a new task worktree (`launch.ts`). */
+  hooks: { after_create: string[][]; after_code: string[][]; after_merge: string[][] };
   /** After every coder turn: cheap checks (lint, types). */
   gates: string[][];
   /** In the merge queue, on the branch rebased onto the target, before the fast-forward: the tests. `gates` when unset. */
   merge_gates: string[][];
   protected: string[];
+  /**
+   * File names (no directory) whose change makes a merge run `hooks.after_merge`; their bodies go last in the review's
+   * patch. Default `LOCKFILES`.
+   */
+  lockfiles: string[];
 }
 
 export const DEFAULT_PROTECTED = ["factory.yaml", ".factory/**"];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function argvList(value: unknown, key: string): string[][] {
   if (value === undefined || value === null) return [];
@@ -37,7 +41,9 @@ function argvList(value: unknown, key: string): string[][] {
 
 /** `raw` is the parsed YAML document. A missing or empty file (`undefined`, `null`) means no hooks and no gates. */
 export function parseFactoryConfig(raw: unknown): FactoryConfig {
-  if (raw === undefined || raw === null) return { hooks: { after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED };
+  if (raw === undefined || raw === null) {
+    return { hooks: { after_create: [], after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED, lockfiles: LOCKFILES };
+  }
   if (!isRecord(raw)) throw new Error("factory.yaml: the document must be a mapping");
   const hooks = raw.hooks ?? {};
   if (!isRecord(hooks)) throw new Error("factory.yaml: hooks must be a mapping");
@@ -45,12 +51,32 @@ export function parseFactoryConfig(raw: unknown): FactoryConfig {
   if (!Array.isArray(globs) || !globs.every((glob) => typeof glob === "string" && glob !== "")) {
     throw new Error("factory.yaml: protected must be a list of globs");
   }
+  const lockfiles = raw.lockfiles ?? LOCKFILES;
+  if (!Array.isArray(lockfiles) || !lockfiles.every((name) => typeof name === "string" && name !== "" && !name.includes("/"))) {
+    throw new Error("factory.yaml: lockfiles must be a list of file names without a slash");
+  }
   return {
-    hooks: { after_code: argvList(hooks.after_code, "hooks.after_code"), after_merge: argvList(hooks.after_merge, "hooks.after_merge") },
+    hooks: {
+      after_create: argvList(hooks.after_create, "hooks.after_create"),
+      after_code: argvList(hooks.after_code, "hooks.after_code"),
+      after_merge: argvList(hooks.after_merge, "hooks.after_merge"),
+    },
     gates: argvList(raw.gates, "gates"),
     merge_gates: raw.merge_gates === undefined ? argvList(raw.gates, "gates") : argvList(raw.merge_gates, "merge_gates"),
     protected: globs,
+    lockfiles,
   };
+}
+
+/** `factory.yaml` text as `parseFactoryConfig` reads it. Throws an `Error` starting `factory.yaml:`. */
+export function parseFactoryYaml(text: string): FactoryConfig {
+  let raw: unknown;
+  try {
+    raw = Bun.YAML.parse(text);
+  } catch (error) {
+    throw new Error(`factory.yaml: ${errorText(error)}`);
+  }
+  return parseFactoryConfig(raw);
 }
 
 /**
@@ -104,15 +130,9 @@ export async function loadTaskFiles(exec: Exec, root: string, base: string): Pro
   const present = new Set((await git(exec, root, ["ls-tree", "-r", "--name-only", base, "--", ...paths])).split("\n"));
   const show = (path: string) => (present.has(path) ? git(exec, root, ["show", `${base}:${path}`]) : undefined);
   const yaml = await show(CONFIG_PATH);
-  let raw: unknown;
-  try {
-    raw = yaml === undefined ? undefined : Bun.YAML.parse(yaml);
-  } catch (error) {
-    throw new Error(`factory.yaml: ${error instanceof Error ? error.message : String(error)}`);
-  }
   const prompt = async (path: string) => {
     const content = await show(path);
     return content === undefined ? undefined : rolePromptText(content) || undefined;
   };
-  return { config: parseFactoryConfig(raw), prompts: { coder: await prompt(ROLE_PATHS.coder), reviewer: await prompt(ROLE_PATHS.reviewer) } };
+  return { config: yaml === undefined ? parseFactoryConfig(undefined) : parseFactoryYaml(yaml), prompts: { coder: await prompt(ROLE_PATHS.coder), reviewer: await prompt(ROLE_PATHS.reviewer) } };
 }

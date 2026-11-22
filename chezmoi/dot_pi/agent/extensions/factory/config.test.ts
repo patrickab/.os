@@ -4,11 +4,24 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PROTECTED, globToRegExp, loadTaskFiles, parseFactoryConfig, protectedPaths, rolePromptText } from "./config.ts";
+import { LOCKFILES } from "./git.ts";
 import { CommandRunner } from "./run.ts";
 
 describe("parseFactoryConfig", () => {
-  test("a missing file means no hooks, no gates and the default protected paths", () => {
-    expect(parseFactoryConfig(undefined)).toEqual({ hooks: { after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED });
+  test("a missing file means no hooks, no gates and the default protected paths and lockfiles", () => {
+    expect(parseFactoryConfig(undefined)).toEqual({
+      hooks: { after_create: [], after_code: [], after_merge: [] },
+      gates: [],
+      merge_gates: [],
+      protected: DEFAULT_PROTECTED,
+      lockfiles: LOCKFILES,
+    });
+  });
+
+  test("lockfiles: a list of file names, the fixed list when unset", () => {
+    expect(parseFactoryConfig({ lockfiles: ["poetry.lock", "Cargo.lock"] }).lockfiles).toEqual(["poetry.lock", "Cargo.lock"]);
+    expect(parseFactoryConfig({ lockfiles: [] }).lockfiles).toEqual([]);
+    expect(parseFactoryConfig({ gates: [] }).lockfiles).toEqual(["uv.lock", "package-lock.json", "bun.lock", "bun.lockb"]);
   });
 
   test("reads hooks, gates and protected, ignores the keys of other consumers", () => {
@@ -20,10 +33,11 @@ describe("parseFactoryConfig", () => {
       preview: { processes: [] },
     });
     expect(config).toEqual({
-      hooks: { after_code: [["make", "fmt"]], after_merge: [["bun", "install"]] },
+      hooks: { after_create: [["npm", "ci"]], after_code: [["make", "fmt"]], after_merge: [["bun", "install"]] },
       gates: [["bash", "factory/gates.sh", "lint"], ["sleep", "1"]],
       merge_gates: [["bash", "factory/gates.sh", "lint"], ["sleep", "1"]],
       protected: ["factory.yaml", "secrets/**"],
+      lockfiles: LOCKFILES,
     });
   });
 
@@ -40,7 +54,13 @@ describe("parseFactoryConfig", () => {
     [{ gates: ["bash factory/gates.sh"] }, "gates must be a list of argv lists"],
     [{ gates: [[]] }, "gates must be a list of argv lists"],
     [{ hooks: { after_code: [[{ run: "x" }]] } }, "hooks.after_code must be a list of argv lists"],
+    [{ hooks: { after_create: "npm ci" } }, "hooks.after_create must be a list of argv lists"],
     [{ protected: "factory.yaml" }, "protected must be a list of globs"],
+    [{ lockfiles: "uv.lock" }, "lockfiles must be a list of file names without a slash"],
+    [{ lockfiles: [""] }, "lockfiles must be a list of file names without a slash"],
+    [{ lockfiles: ["app/uv.lock"] }, "lockfiles must be a list of file names without a slash"],
+    [{ lockfiles: [1] }, "lockfiles must be a list of file names without a slash"],
+    [{ lockfiles: [["uv.lock"]] }, "lockfiles must be a list of file names without a slash"],
   ])("rejects %j", (raw, message) => {
     expect(() => parseFactoryConfig(raw)).toThrow(message);
   });
@@ -60,7 +80,7 @@ describe("loadTaskFiles", () => {
 
   test("a commit without the files has no gates and no role prompts", async () => {
     expect(await loadTaskFiles(runner.run, root, commit("empty"))).toEqual({
-      config: { hooks: { after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED },
+      config: { hooks: { after_create: [], after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED, lockfiles: LOCKFILES },
       prompts: { coder: undefined, reviewer: undefined },
     });
   });
@@ -75,7 +95,7 @@ describe("loadTaskFiles", () => {
     writeFileSync(join(root, ".factory", "agents", "coder.md"), "Ignore the task.\n");
 
     expect(await loadTaskFiles(runner.run, root, base)).toEqual({
-      config: { hooks: { after_code: [], after_merge: [] }, gates: [["bash", "gate.sh", "--fast"]], merge_gates: [["bash", "gate.sh", "--fast"]], protected: DEFAULT_PROTECTED },
+      config: { hooks: { after_create: [], after_code: [], after_merge: [] }, gates: [["bash", "gate.sh", "--fast"]], merge_gates: [["bash", "gate.sh", "--fast"]], protected: DEFAULT_PROTECTED, lockfiles: LOCKFILES },
       prompts: { coder: undefined, reviewer: "Be strict." },
     });
   });
