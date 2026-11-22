@@ -201,7 +201,8 @@ export async function sendCommand(record: TaskRecord, message: string): Promise<
     const child = spawn(bun, [RUNNER_PATH, record.worktree, record.sessionDir, record.sessionId, message], {
       cwd: dirname(RUNNER_PATH),
       detached: true,
-      env: { ...process.env, FACTORY_TASK_LOCK: taskLockPath(record.id) },
+      // A task runs without pauses, so the default short prompt cache is enough and the dearer long cache writes are not.
+      env: { ...process.env, FACTORY_TASK_LOCK: taskLockPath(record.id), PI_CACHE_RETENTION: "short" },
       stdio: ["ignore", log, log],
     });
     await new Promise<void>((resolveSpawn, reject) => {

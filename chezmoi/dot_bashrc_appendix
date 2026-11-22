@@ -53,6 +53,8 @@ export TERMINAL="kitty"
 export UV_PROJECT_ENVIRONMENT=".venv"
 # Over SSH the outer kitty is not detectable from env, so force inline images (omp also uses Unicode placeholders under tmux).
 [ -n "${SSH_CONNECTION:-}" ] && export PI_FORCE_IMAGE_PROTOCOL=kitty
+# Keep the provider's prompt cache for an hour: an interactive session often waits longer than the default 5 minutes.
+export PI_CACHE_RETENTION=long
 
 # Homebrew & Atuin
 [ -f /home/linuxbrew/.linuxbrew/bin/brew ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
