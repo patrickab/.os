@@ -281,6 +281,14 @@ When several items will likely be referenced later present them together as a bu
 - For completed work, concisely report what has been done. Flag things that the user may need to be aware of.
 - A tool that refuses its version (uv `required-version`, `engines`) is fixed in the environment, never worked around.
 
+### Tool calls
+
+Long tool output degrades later reasoning and hides the current state from the user.
+
+- Shape every call for the next decision: its output holds what that decision needs, in a readable and informative form, and little else.
+- A filter must not swallow what matters by mistake: errors and unexpected output still have to come through.
+- Before a long-running task, check with a short run that it produces the expected output, so it does not fail late.
+
 ### Waiting
 
 - **Wait on a signal, never on a clock**: when a process, job or subagent can report that it finished (a wake-up, a blocking wait, a completion notice), end the turn or block on that. Never `sleep`, never poll on an interval. Poll only when nothing can signal (a remote job), then every 15 s.
