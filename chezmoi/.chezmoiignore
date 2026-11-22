@@ -23,3 +23,9 @@
 
 # Repo docs, not config.
 .pi/README.md
+
+# The factory plugin's dev files: its tests and their packages run from this repo, hosts get only the plugin.
+.pi/agent/extensions/factory/node_modules
+.pi/agent/extensions/factory/bun.lock
+.pi/agent/extensions/factory/tsconfig.json
+.pi/agent/extensions/factory/*.test.ts
