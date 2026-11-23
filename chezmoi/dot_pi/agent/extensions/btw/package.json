@@ -1,0 +1,17 @@
+{
+  "name": "pi-btw",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.6.0",
+    "@types/bun": "latest",
+    "typescript": "^5.8.0"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

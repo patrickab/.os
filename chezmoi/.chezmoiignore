@@ -29,3 +29,9 @@
 .pi/agent/extensions/factory/bun.lock
 .pi/agent/extensions/factory/tsconfig.json
 .pi/agent/extensions/factory/*.test.ts
+
+# The btw plugin's dev files, same as factory's.
+.pi/agent/extensions/btw/node_modules
+.pi/agent/extensions/btw/bun.lock
+.pi/agent/extensions/btw/tsconfig.json
+.pi/agent/extensions/btw/*.test.ts
