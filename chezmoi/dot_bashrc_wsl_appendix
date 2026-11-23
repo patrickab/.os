@@ -1,0 +1,49 @@
+# Sourced by ~/.bashrc_appendix on WSL only
+
+# --- NEURA: pull every repo in ~/dev + stack images in the background, at most every 4 h ---
+NEURA_WORKSPACE="$HOME/dev"
+NEURA_BOOTSTRAP="$NEURA_WORKSPACE/cortex-setup/bootstrap"
+NEURA_SYNC_STATE="$HOME/.cache/neura-sync"
+
+is_neura_sync_due() {
+    [[ -d "$NEURA_BOOTSTRAP" ]] && [[ -z $(find "$NEURA_SYNC_STATE.stamp" -mmin -240 2>/dev/null) ]]
+}
+
+has_upstream() {
+    git -C "$1" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1
+}
+
+pull_workspace_repos() {
+    local repo failed=0
+    for repo in "$NEURA_WORKSPACE"/*/; do
+        [[ -d "$repo/.git" ]] || continue
+        echo "== $repo"
+        has_upstream "$repo" || { echo "skipped: no upstream branch"; continue; }
+        if ! git -C "$repo" pull --rebase --autostash; then
+            git -C "$repo" rebase --abort 2>/dev/null
+            failed=1
+        fi
+    done
+    return $failed
+}
+
+neura_sync() {
+    mkdir -p "$(dirname "$NEURA_SYNC_STATE")"
+    (
+        flock -n 9 || exit 0
+        # Truncate the log only once holding the lock, so a concurrent shell can't wipe it
+        exec >"$NEURA_SYNC_STATE.log" 2>&1
+        # Stack runs on the rootful daemon, not the rootless default context
+        export GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" COMPOSE_PROGRESS=quiet DOCKER_CONTEXT=default
+        pull_workspace_repos; pull_status=$?
+        (builtin cd "$NEURA_BOOTSTRAP" && just sync); sync_status=$?
+        if [[ $pull_status -eq 0 && $sync_status -eq 0 ]]; then
+            touch "$NEURA_SYNC_STATE.stamp" && rm -f "$NEURA_SYNC_STATE.failed"
+        else
+            touch "$NEURA_SYNC_STATE.failed"
+        fi
+    ) 9>"$NEURA_SYNC_STATE.lock" >/dev/null 2>&1
+}
+
+[[ -f "$NEURA_SYNC_STATE.failed" ]] && echo "neura sync failed, see $NEURA_SYNC_STATE.log"
+is_neura_sync_due && (neura_sync &)

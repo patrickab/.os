@@ -98,3 +98,6 @@ export EDITOR=nvim
 export VISUAL=nvim
 
 [[ -f ~/.bashrc_appendix_omarchy ]] && source ~/.bashrc_appendix_omarchy
+
+is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
+is_wsl && [[ -f ~/.bashrc_wsl_appendix ]] && source ~/.bashrc_wsl_appendix

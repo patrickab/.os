@@ -74,8 +74,10 @@ else
   fi
 fi
 
-echo "==> Disabling Local Network Access blocking in Zen profiles..."
-PREF='user_pref("network.lna.enabled", false);'
+echo "==> Setting prefs in Zen profiles..."
+# network.lna.enabled: no Local Network Access blocking
+# zen.view.grey-out-inactive-windows: unfocused windows stay normal (looks off when tiled)
+PREFS=(network.lna.enabled zen.view.grey-out-inactive-windows)
 found=0
 for base in \
   "$HOME/.config/zen" \
@@ -90,16 +92,19 @@ for base in \
     found=1
     userjs="${profile%/}/user.js"
     touch "$userjs"
-    if grep -q 'network\.lna\.enabled' "$userjs"; then
-      sed -i "s|^.*network\.lna\.enabled.*$|$PREF|" "$userjs"
-    else
-      printf '%s\n' "$PREF" >>"$userjs"
-    fi
+    for name in "${PREFS[@]}"; do
+      pref="user_pref(\"$name\", false);"
+      if grep -qF "\"$name\"" "$userjs"; then
+        sed -i "s|^.*\"${name//./\\.}\".*$|$pref|" "$userjs"
+      else
+        printf '%s\n' "$pref" >>"$userjs"
+      fi
+    done
     echo "  $userjs"
   done
 done
 if [[ "$found" -eq 0 ]]; then
-  yellow "No Zen profile yet. Launch Zen once, then re-run this script to apply the LNA pref."
+  yellow "No Zen profile yet. Launch Zen once, then re-run this script to apply the prefs."
 fi
 
 green "==> Zen setup complete (default browser: $DESKTOP_FILE)."
