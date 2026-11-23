@@ -47,3 +47,6 @@ neura_sync() {
 
 [[ -f "$NEURA_SYNC_STATE.failed" ]] && echo "neura sync failed, see $NEURA_SYNC_STATE.log"
 is_neura_sync_due && (neura_sync &)
+
+# Work repos have their own shell style: stop nvim from auto-formatting shell files (see nvim shell-no-format.lua)
+export NVIM_NO_SHELL_FORMAT=1
