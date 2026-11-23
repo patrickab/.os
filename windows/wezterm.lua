@@ -47,9 +47,12 @@ config.colors = {
 }
 
 -- Keys: Ctrl+Tab / Ctrl+Shift+Tab cycle panes (kitty: next_window / previous_window)
+-- Alt+Enter: replace WezTerm's default ToggleFullScreen with an explicit CSI-u Alt+Enter so pi
+-- queues a follow-up instead of inserting a newline; fullscreen/monocle is komorebi's job (whkdrc).
 config.keys = {
   { key = 'Tab', mods = 'CTRL',       action = act.ActivatePaneDirection 'Next' },
   { key = 'Tab', mods = 'CTRL|SHIFT', action = act.ActivatePaneDirection 'Prev' },
+  { key = 'Enter', mods = 'ALT',      action = act.SendString '\x1b[13;3u' },
 }
 
 return config
