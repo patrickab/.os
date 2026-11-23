@@ -82,6 +82,7 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
     echo "==> WSL detected — setting up Windows fonts and kitty launcher..."
     ~/.os/scripts/setup-wsl-fonts.sh || echo "!! setup-wsl-fonts.sh failed, continuing" >&2
     ~/.os/scripts/setup-wsl-kitty.sh || echo "!! setup-wsl-kitty.sh failed, continuing" >&2
+    ~/.os/scripts/setup-wsl-tailscale.sh || echo "!! setup-wsl-tailscale.sh failed, continuing" >&2
 fi
 
 if command -v omarchy &> /dev/null; then

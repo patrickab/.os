@@ -1,5 +1,10 @@
+# Device-local hosts (work etc.), never committed. Must come first: ssh uses the first match.
+Include ~/.ssh/config.local
+
 AddKeysToAgent yes
 
-Host 100.96.227.106
-  HostName 100.96.227.106
-  User noob
+# Reuse one authenticated connection (password hosts: log in once, agent reuses it)
+Host *
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%C
+  ControlPersist 8h

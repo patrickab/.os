@@ -1,39 +1,36 @@
 ---
 name: ssh
-description: Connect to the cool-frog remote server (cube1). Use for any remote execution, GPU work, or file access on cube1.
+description: Run commands on remote machines over SSH. Hosts are defined per device in ~/.ssh/config.local. Use for any remote execution or file access.
 ---
 
-# SSH to cube1
+# SSH
 
-## Connect
+Hosts come from `~/.ssh/config` and the device-local `~/.ssh/config.local` (list: `grep -h '^Host ' ~/.ssh/config*`). Never hardcode hosts or secrets in this skill.
 
-```bash
-ssh bitzer@cube1.pbs.cit.tum.de
-```
+## Run
 
-- `$SSH_CUBE_1` holds the password. Agents connect non-interactively via `sshpass`:
+Password for host `<alias>` is in env var `SSH_PW_<ALIAS>` (uppercase, `-` as `_`), loaded from `~/.secrets`. If unset, the host uses key login.
 
 ```bash
-SSHPASS="$SSH_CUBE_1" sshpass -e ssh -o StrictHostKeyChecking=accept-new bitzer@cube1.pbs.cit.tum.de '<command>'
+# key login
+ssh -o BatchMode=yes <alias> '<command>'
+# password login
+SSHPASS="$SSH_PW_<ALIAS>" sshpass -e ssh -o StrictHostKeyChecking=accept-new <alias> '<command>'
 ```
 
-- Never print or echo `$SSH_CUBE_1`
+- Connections are shared for 8h (`ControlMaster`), so after the first call no password is needed
+- Never print password variables
+- Unknown alias or missing variable: tell the user to add the host to `~/.ssh/config.local` / the variable to `~/.secrets`
 
 ## Long-running processes
 
-cube1 has no tmux, use `screen`. ALWAYS launch processes that outlive one command in a detached screen session named `cool-frog-<job>`, never in the foreground of the SSH session.
+Launch anything that outlives one command in a detached `screen` (or tmux if present) session named `<alias>-<job>`, logging to `~/agent-jobs/<job>.log`.
 
 ```bash
-# start (log in ~/cool-frog-jobs/<job>.log, session survives disconnect)
-mkdir -p ~/cool-frog-jobs && cd <workdir> && \
-screen -dmS cool-frog-<job> bash -c '<cmd> > ~/cool-frog-jobs/<job>.log 2>&1; echo "exit=$?" >> ~/cool-frog-jobs/<job>.log'
-
-screen -ls                                  # list running jobs
-tail -n 50 ~/cool-frog-jobs/<job>.log       # inspect output, last line `exit=N` once finished
-screen -S cool-frog-<job> -X quit           # stop
+ssh -o BatchMode=yes <alias> 'mkdir -p ~/agent-jobs && cd <workdir> && screen -dmS <alias>-<job> bash -c "<cmd> > ~/agent-jobs/<job>.log 2>&1; echo exit=\$? >> ~/agent-jobs/<job>.log"'
+ssh -o BatchMode=yes <alias> 'screen -ls; tail -n 50 ~/agent-jobs/<job>.log'
+ssh -o BatchMode=yes <alias> 'screen -S <alias>-<job> -X quit'
 ```
 
-- Session ends when the command ends, so a listed session means still running
-- `<job>` is unique, never reuse a running name
-- Attach interactively only from a human terminal: `TERM=xterm-256color screen -r cool-frog-<job>` (kitty's `xterm-kitty` has no terminfo on cube1)
-- Linger is off on cube1, avoid `systemd-run --user`
+- Job names unique; a listed session is still running; last log line `exit=N` when done
+- Attach only from a human terminal
