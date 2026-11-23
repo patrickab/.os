@@ -95,6 +95,20 @@ function fake(cwd: string) {
   return { deps, entries, userMessages, coderMessages, flags, states, holdTask };
 }
 
+describe("pipelineSteps.askCommitMessage", () => {
+  test("a conventional task title is the message, until the task merged: a follow-up asks for its own; the merge clears the last one", async () => {
+    const pi = fake(dir);
+    pi.holdTask("running");
+    const task = { ...pi.deps.session.snapshot!.task, title: "feat: add t" };
+    const files = { config: {}, prompts: {} } as never;
+    expect(pipelineSteps(pi.deps, task, files, false).askCommitMessage!()).toBe(false);
+    record(pi.deps, "factory-commit-message", { title: "feat: t", body: "- t" });
+    record(pi.deps, "factory-merge", { ok: true, commit: "a".repeat(40), error: null, depsSynced: false });
+    expect(pi.deps.session.snapshot!.commitMessage).toBeNull();
+    expect(pipelineSteps(pi.deps, task, files, false).askCommitMessage!()).toBe(true);
+  });
+});
+
 describe("startTask", () => {
   test("expected failures are results and write nothing", async () => {
     const held = fake(dir);

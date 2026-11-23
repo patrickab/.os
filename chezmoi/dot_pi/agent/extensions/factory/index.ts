@@ -6,6 +6,7 @@
  *   /factory approve                                  merge a task that waits for approve
  *   /factory retry                                    another coder turn on a blocked or cancelled task
  *   /factory cancel                                   kill the running command group, end `cancelled`
+ *   /factory models [add|remove|set ...]              the user's factory model list (`models.ts`, any session)
  *
  * - After every coder turn (`agent_before_settle`) it runs `hooks.after_code`, `gates`, the protected-path check and
  *   the review. A problem goes back to the coder as a `factory-feedback` message and starts the next round, up to
@@ -27,9 +28,18 @@
  * - A plain message to a waiting, blocked, cancelled or done task starts new rounds
  * - Loaded into every coding session: without a `factory-task` entry no handler does anything
  * - Registers the `factory` tool (`tool.ts`), which starts and drives tasks like this one from any session
+ * - A passed round of a task whose title is not a conventional commit title asks the coder for the commit message
+ *   first (`commitmsg.ts`), in the same run
+ * - A message to a merged task (`done`/`merged`) opens a follow-up run (`followup.ts`): its change merges as a new
+ *   commit, with a commit message the coder is asked for; a part outside the task's scope goes to a new task through
+ *   `factory_new_task` (registered in task sessions only, usable in a follow-up run, once per user message), on this
+ *   task's target branch and merge mode
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { messageRoundDrafts, runRound, type RoundResult } from "./pipeline.ts";
+import { followUpPrompt, registerNewTaskTool } from "./followup.ts";
+import { snapshotTree } from "./git.ts";
+import { modelsCommand } from "./models.ts";
+import { commitAnswerDrafts, messageRoundDrafts, runRound, type RoundResult } from "./pipeline.ts";
 import {
   approveTask,
   cancelTask,
@@ -50,12 +60,28 @@ import {
   type OpsDeps,
   type RunOpening,
 } from "./ops.ts";
-import { applyEntry, followUpMessages, rebuild, RESTING_STATES, stateDraft, wasInterrupted, type Draft, type State } from "./state.ts";
+import { applyEntry, followUpMessages, messageText, rebuild, RESTING_STATES, stateDraft, wasInterrupted, type Draft, type Snapshot, type State } from "./state.ts";
 import { registerFactoryTool } from "./tool.ts";
 import { errorText } from "./util.ts";
 
 /** Tag of the system prompt section that carries `.factory/agents/coder.md`. */
 const ROLE_SECTION = "factory_role";
+/** Tag of the system prompt section that tells the coder how a follow-up on a merged task is carried out. */
+const FOLLOW_UP_SECTION = "factory_followup";
+
+/** The text of the last assistant message of a session branch, empty when there is none. */
+function lastAssistantText(entries: Iterable<{ type: string }>): string {
+  let text = "";
+  for (const entry of entries) {
+    const { message } = entry as { message?: { role?: unknown; content?: unknown } };
+    if (entry.type === "message" && message?.role === "assistant") text = messageText(message);
+  }
+  return text;
+}
+
+function isMergedTask(snapshot: Snapshot): boolean {
+  return snapshot.state === "done" && snapshot.reason.startsWith("merged");
+}
 
 export default function (pi: ExtensionAPI) {
   registerFactoryTool(pi);
@@ -64,6 +90,32 @@ export default function (pi: ExtensionAPI) {
   let roundEnd: State | undefined;
   /** What the `input` handler checked for the user message whose run `before_agent_start` opens next. */
   let opened: RunOpening | undefined;
+  /** The commit message ask of a passed round awaiting the coder's answer: the state it passed into, the tree that passed. */
+  let commitAsk: { passedInto: State; tree: string } | undefined;
+  let newTaskTool = false;
+  /** `factory_new_task` exists in task sessions only: registered once the session holds a task. */
+  const registerTaskTools = () => {
+    if (newTaskTool || !session.snapshot) return;
+    newTaskTool = true;
+    registerNewTaskTool(pi, {
+      refusal: () => {
+        const current = session.snapshot;
+        if (!current) return "this session holds no task";
+        if (!session.followUp || current.state !== "running") return "only a follow-up run on a merged task may start a new task";
+        if (session.followUp.spawnedForMessage) return "a task was started for this message already: one per message";
+        return null;
+      },
+      overrides: () => {
+        const task = session.snapshot?.task;
+        return task ? { branch: task.mainBranch, merge: task.settings.merge } : {};
+      },
+      spawned: (spawn) => {
+        if (session.followUp) session.followUp.spawnedForMessage = true;
+        pi.appendEntry("factory-spawn", spawn);
+        session.snapshot = applyEntry(session.snapshot, "factory-spawn", spawn);
+      },
+    });
+  };
 
   const deps = (ctx: ExtensionContext): OpsDeps => ({
     session,
@@ -88,7 +140,12 @@ export default function (pi: ExtensionAPI) {
   const command = (args: string, ops: OpsDeps): Promise<OpResult> => {
     const text = args.trim();
     const verb = text.split(/\s+/, 1)[0];
-    if (verb === "start") return startTask(ops, text.slice(verb.length).trim());
+    if (verb === "start") {
+      return startTask(ops, text.slice(verb.length).trim()).then((result) => {
+        registerTaskTools();
+        return result;
+      });
+    }
     if (verb === "init") return initConfig(ops);
     if (!session.snapshot) return Promise.resolve({ ok: false, error: "this session holds no task" });
     if (verb === "approve") return approveTask(ops);
@@ -98,8 +155,13 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.registerCommand("factory", {
-    description: "Agent factory: init (draft factory.yaml) | task: start <json> | approve | retry | cancel",
+    description: "Agent factory: init (draft factory.yaml) | models [add|remove|set ...] | task: start <json> | approve | retry | cancel",
     handler: async (args, ctx) => {
+      const [verb = ""] = args.trim().split(/\s+/, 1);
+      if (verb === "models") {
+        await modelsCommand(args.trim().slice(verb.length).trim(), ctx).catch((error) => ctx.ui.notify(`factory: ${errorText(error)}`, "error"));
+        return;
+      }
       const result = await command(args, deps(ctx)).catch((error): OpResult => ({ ok: false, error: errorText(error) }));
       if (!result.ok) ctx.ui.notify(`factory: ${result.error}`, "error");
       else if (result.message) ctx.ui.notify(`factory: ${result.message}`, "info");
@@ -109,6 +171,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     session.snapshot = rebuild(ctx.sessionManager.getBranch());
     session.files = undefined;
+    registerTaskTools();
     if (session.snapshot && wasInterrupted(session.snapshot)) await resumeTask(deps(ctx), session.snapshot);
   });
 
@@ -125,6 +188,8 @@ export default function (pi: ExtensionAPI) {
   pi.on("input", async (_event, ctx) => {
     const atRest = session.snapshot;
     if (!atRest) return;
+    // One `factory_new_task` per user message, a follow-up queued during the run included.
+    if (session.followUp) session.followUp.spawnedForMessage = false;
     if (atRest.state === "merging") {
       ctx.ui.notify("factory: a merge is running, send the message when it has ended", "warning");
       return { action: "handled" };
@@ -132,6 +197,7 @@ export default function (pi: ExtensionAPI) {
     if (!RESTING_STATES.includes(atRest.state)) return;
     const ops = deps(ctx);
     try {
+      session.followUp = isMergedTask(atRest) ? { merged: atRest.mergedCommit, spawnedForMessage: false } : undefined;
       opened = await openRun(ops, atRest);
     } catch (error) {
       ctx.ui.notify(`factory: the message starts no run: ${errorText(error)}`, "error");
@@ -157,6 +223,7 @@ export default function (pi: ExtensionAPI) {
     // A `factory.yaml` that does not parse is reported by the round, not here.
     const taskFilesNow = await taskFiles(ops, atRest.task).catch(() => undefined);
     if (taskFilesNow?.prompts.coder) event.systemPromptOptions.sections[ROLE_SECTION] = taskFilesNow.prompts.coder;
+    if (session.followUp) event.systemPromptOptions.sections[FOLLOW_UP_SECTION] = followUpPrompt(session.followUp.merged);
     // The user's message and the conflict both reach the coder in this run.
     if (opens && opening.conflict !== undefined) return { message: conflictMessage(atRest.round, opening.conflict) };
   });
@@ -177,12 +244,21 @@ export default function (pi: ExtensionAPI) {
       return ctx.hasPendingMessages() ? { entries: [...entries, ...messageRoundDrafts(round)], continue: true } : { entries, continue: false };
     };
     let result: RoundResult;
+    const asked = commitAsk;
+    commitAsk = undefined;
     if (event.outcome === "error") {
       result = stopped("agent_error");
     } else {
       try {
         const ops = deps(ctx);
-        result = await runRound(current, pipelineSteps(ops, task, await taskFiles(ops, task), false));
+        const { runner } = session;
+        // The answer to the commit message ask, unless the coder changed files with it: then the round runs again.
+        if (asked && (await snapshotTree(runner.run, ctx.cwd)) === asked.tree) {
+          result = commitAnswerDrafts(current, lastAssistantText(ctx.sessionManager.getBranch()), asked.passedInto, ctx.hasPendingMessages());
+        } else {
+          result = await runRound(current, pipelineSteps(ops, task, await taskFiles(ops, task), false));
+          if (result.commitAsk) commitAsk = { passedInto: result.commitAsk, tree: await snapshotTree(runner.run, ctx.cwd) };
+        }
       } catch (error) {
         result = stopped(`pipeline_error: ${errorText(error)}`);
       }

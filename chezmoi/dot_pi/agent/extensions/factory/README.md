@@ -64,6 +64,17 @@ problems go back to the coder. A passed round merges into the target branch, or 
 - The `factory` tool for agents: `{action, ...}` with `action` an `ACTIONS` name that is not `hostOnly` and that
   action's params. The answer is the result as JSON text and `details`; errors are error results starting `factory: `.
   Calls run one at a time
+- In a task's own session (Pi started by the runner, `FACTORY_TASK_SESSION=1`, or a session holding a `factory-task`
+  entry) the tool offers only the actions with `mutates: false`; a mutating one (`tasks.start`, `models.set`, ...)
+  answers as unknown. A task's coder starts a task only through `factory_new_task` (below)
+
+## Factory models (`models.ts`)
+
+- One user-level list of `provider/model` ids every task and repository picks from, in `<agent dir>/factory/models.yaml`.
+  Actions `models.get` (`{models}`) and `models.set` (`{models}`, deduplicated); `/factory models` lists it,
+  `/factory models add <id>`, `remove <id>`, `set <id> ...` change it (in the TUI `add` alone offers Pi's models)
+- `tasks.start` and `settings.set` are `refused` for a model not on the list, and for anything while it is empty
+  ("no factory models are set (set them with /factory models)"). Reading settings and listing tasks never check it
 
 ## Commands (inside a task's own Pi session)
 
@@ -71,6 +82,25 @@ problems go back to the coder. A passed round merges into the target branch, or 
 - `/factory start <json>`: `{"request", "title", "settings"}`; what the tool's runner and gigachad-bot send
 - `/factory approve`, `/factory retry`, `/factory cancel`
 - A plain message to a resting task starts a new run
+
+## Commit message
+
+- A task title that is a conventional commit title (`type(scope)!: summary`) is the merge commit's message. Else,
+  after the last round passed and before the merge, the coder is asked for one: a conventional title of at most 72
+  characters, a blank line, `- ` bullets (at most 50 lines, 4096 characters, no control characters). An invalid
+  answer falls back to the task title. The message is the `factory-commit-message` entry and goes into the
+  `factory-merge-intent` entry, so a later runner's approve uses it
+
+## Follow-up on a merged task
+
+- A message to a task that is `done`/`merged` opens a follow-up run: the coder works in the task's worktree (made
+  again from the task branch when it is gone). Once the gates pass, the change merges as a normal new commit through
+  the usual merge, with its own commit message (the coder is always asked for it in a follow-up). No history is
+  rewritten
+- A part of the request outside the task's scope goes to a new task: the coder calls `factory_new_task {title,
+  handoff}` (title a conventional commit title, handoff the complete request). The tool exists in task sessions only,
+  works only in a follow-up run on a merged task, once per user message; the new task takes over this task's target
+  branch and merge mode, and the parent records a `factory-spawn` entry (timeline kind `spawn`)
 
 ## How a task runs without an interactive session
 
@@ -87,12 +117,14 @@ problems go back to the coder. A passed round merges into the target branch, or 
 - `sessions/<repo dir name>/` (`/a/b` -> `--a-b--`): the Pi session files of a repository's tasks, apart from
   Pi's own sessions (`pi -r` does not list them). The task's truth is its `factory-*` session entries
 - `repos/<URI-encoded path>.yaml` (`/a/b` -> `%2Fa%2Fb.yaml`): per-repo settings (`merge`, `maxRounds`, `review`, `branch`, `models`, `preview`); the file registers the repo
+- `models.yaml`: the factory models, a YAML list of `provider/model` ids
 - Reviews: `<agent dir>/factory-reviews/<session id>/`. Merge lock and queue: in the repo's git common dir
 
 ## Entry protocol
 
 - Version 2 (`PROTOCOL_VERSION` in `state.ts`, written into every `factory-task` entry). Entries: `factory-task`,
-  `-round`, `-gate`, `-review`, `-merge-intent`, `-merge`, `-state`, and `factory-feedback` messages
+  `-round`, `-gate`, `-review`, `-merge-intent`, `-merge`, `-state`, `-commit-message`, `-spawn`, and
+  `factory-feedback` and `factory-commit-ask` messages
 
 ## Development
 

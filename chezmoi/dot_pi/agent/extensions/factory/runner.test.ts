@@ -38,6 +38,7 @@ const log = process.env.FAKE_PI_LOG;
 const mode = process.env.FAKE_PI_MODE ?? "merge";
 const note = (text) => appendFileSync(log, text + "\\n");
 writeFileSync(log + ".pid", String(process.pid));
+writeFileSync(log + ".env", process.env.FACTORY_TASK_SESSION ?? "");
 note("argv " + JSON.stringify(args));
 note("cwd " + process.cwd());
 if (mode === "early-exit") process.exit(0);
@@ -256,6 +257,8 @@ describe("runner", () => {
     expect(lines[0]).toBe(`argv ${JSON.stringify(["--mode", "rpc", "--session-dir", c.sessionDir, "--session-id", c.sessionId])}`);
     expect(lines[1]).toBe(`cwd ${c.worktree}`);
     expect(lines[2]).toBe(`prompt ${JSON.stringify({ id: "1", type: "prompt", message: "/factory start {}" })}`);
+    // The factory tool in that Pi offers only the actions that change nothing (`tool.ts`).
+    expect(readFileSync(`${c.log}.env`, "utf8")).toBe("1");
   }, 15_000);
 
   test("keeps stdin open while the settled task is merging, closes it once it is done", async () => {

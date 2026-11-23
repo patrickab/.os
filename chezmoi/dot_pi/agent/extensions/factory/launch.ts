@@ -21,14 +21,15 @@ import { appendFile, mkdir, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseFactoryYaml } from "./config.ts";
 import { git, primaryCheckout } from "./git.ts";
-import { inboxReadPath, lastFactoryState } from "./runner.ts";
+import { inboxReadPath, lastFactoryState, taskMainBranch } from "./runner.ts";
 import { CommandRunner, runCommand, type Exec } from "./run.ts";
 import { factoryHome, loadSettings, resolveSettings, type StoredSettings } from "./settings.ts";
 import type { Settings, StartPayload } from "./state.ts";
 import { handTaskLock, lockTask, removeTask, TaskBusyError, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
 import { outputTail } from "./util.ts";
 
-const RUNNER_PATH = join(import.meta.dir, "runner.ts");
+// `import.meta.dirname`, not Bun's `import.meta.dir`: inside Pi the latter is not this directory, and a runner would not start.
+const RUNNER_PATH = join(import.meta.dirname, "runner.ts");
 const SLUG_MAX_CHARS = 40;
 const HOOK_TIMEOUT_MS = 10 * 60_000;
 /** How long `stopRunners` waits for a runner to end after SIGTERM, then after SIGKILL. */
@@ -283,10 +284,24 @@ export async function messageTask(record: TaskRecord, text: string, env?: Runner
   try {
     await refuseState();
     if ((await liveRunners(record)).length > 0) throw new TaskBusyError(`task ${record.id.slice(0, 8)} is busy: its last runner is still ending, try again in a few seconds`);
+    if ((await lastFactoryState(record.sessionDir, record.sessionId))?.state === "done") await restoreWorktree(record);
     await sendCommand(record, text, env);
   } finally {
     await unlockTask(record.id);
   }
+}
+
+/**
+ * The worktree of a done task that is gone, made again before a runner starts in it: on the task branch when that
+ * still exists, else on a new one off the target branch. `git worktree prune` first drops the stale entry.
+ */
+export async function restoreWorktree(record: TaskRecord): Promise<void> {
+  if (existsSync(record.worktree)) return;
+  const target = await taskMainBranch(record.sessionDir, record.sessionId);
+  await git(runCommand, record.repo, ["worktree", "prune"]);
+  if (await localBranchExists(record.repo, record.branch)) await git(runCommand, record.repo, ["worktree", "add", "--quiet", record.worktree, record.branch]);
+  else if (target !== undefined) await git(runCommand, record.repo, ["worktree", "add", "--quiet", "-b", record.branch, record.worktree, `refs/heads/${target}`]);
+  else throw new Error(`the worktree ${record.worktree} is gone and the task's target branch is unknown`);
 }
 
 /** The pids of the runners of a task still alive, found by their command line (`runner.ts ... <sessionId> ...`). */

@@ -4,7 +4,7 @@
  * `bun runner.ts <worktree> <sessionDir> <sessionId> <inboxPath> <message>`
  *
  * - Spawns `pi --mode rpc --session-dir <sessionDir> --session-id <sessionId>` in the worktree (Pi loads the
- *   factory plugin from its extensions dir by itself) and sends `message` as the prompt
+ *   factory plugin from its extensions dir by itself), with `TASK_SESSION_ENV=1`, and sends `message` as the prompt
  * - Closes Pi's stdin once Pi answered the prompt, no agent run is active (`agent_start` .. `agent_settled`), no inbox
  *   line is unsent or unanswered and the task rests (`RESTING_STATES`). `/factory approve`, `/factory retry` and a plain
  *   message start at rest, so for them the task must first have left that rest: a `factory-state` entry written after
@@ -39,6 +39,8 @@ const CHECK_INTERVAL_MS = 2000;
 const INBOX_POLL_MS = 250;
 const KILL_GRACE_MS = 3000;
 const PROMPT_ID = "1";
+/** Set to `1` in the environment of the Pi a runner starts: that Pi holds a task's session (`tool.ts` reads it). */
+export const TASK_SESSION_ENV = "FACTORY_TASK_SESSION";
 
 /** The session file Pi writes for `sessionId` in `sessionDir` (`<timestamp>_<sessionId>.jsonl`), if it exists yet. */
 export async function sessionFilePath(sessionDir: string, sessionId: string): Promise<string | undefined> {
@@ -164,6 +166,7 @@ export async function runTaskCommand(worktree: string, sessionDir: string, sessi
   let inboxOffset = await readInboxOffset(inboxPath);
   const pi = Bun.spawn(["pi", "--mode", "rpc", "--session-dir", sessionDir, "--session-id", sessionId], {
     cwd: worktree,
+    env: { ...process.env, [TASK_SESSION_ENV]: "1" },
     stdin: "pipe",
     stdout: "pipe",
     stderr: "inherit",
