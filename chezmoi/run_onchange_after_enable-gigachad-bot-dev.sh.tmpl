@@ -1,0 +1,8 @@
+#!/bin/bash
+# Enables the gigachad-bot dev stack so it starts at login. Re-runs when the unit changes:
+# {{ include "dot_config/systemd/user/gigachad-bot-dev.service" | sha256sum }}
+# Enable only, no --now: a manually started run.sh may already hold the ports.
+set -euo pipefail
+
+systemctl --user daemon-reload
+systemctl --user enable gigachad-bot-dev.service
