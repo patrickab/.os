@@ -527,7 +527,7 @@ describe("mergeTask: what a merge must not get wrong", () => {
     await holder.exited;
     expect(Date.now() - started).toBeLessThan(4000);
     expect(mergeData(outcome)).toMatchObject({ ok: false, error: "cancelled while waiting for the merge lock" });
-    expect(intents).toEqual([{ commit: gitIn(worktree, "rev-parse", "HEAD"), before: task.baseSha }]);
+    expect(intents).toEqual([{ commit: gitIn(worktree, "rev-parse", "HEAD"), before: task.baseSha, message: { title: task.title, body: "" } }]);
     await Bun.sleep(300);
     expect(gitIn(repo, "rev-parse", "main")).toBe(task.baseSha);
   });
@@ -597,7 +597,7 @@ test("a round whose diff touches a protected path is refused before any merge", 
   const task = await taskIn(worktree);
   writeFileSync(join(worktree, "feature.txt"), "feature\n");
   writeFileSync(join(worktree, "factory.yaml"), "gates: [[true]]\n");
-  const snapshot: Snapshot = { task, state: "running", round: 1, runFirstRound: 1, reason: "start", mergeIntent: null, mergeError: null };
+  const snapshot: Snapshot = { task, state: "running", round: 1, runFirstRound: 1, reason: "start", mergeIntent: null, mergeError: null, mergedCommit: null, commitMessage: null };
   let merges = 0;
   const steps: PipelineSteps = {
     status: () => undefined,

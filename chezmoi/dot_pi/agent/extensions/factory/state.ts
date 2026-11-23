@@ -2,10 +2,11 @@
  * Factory task state, without Pi, git or I/O.
  *
  * - Provides the entry shapes the extension writes (`factory-task`, `-round`, `-gate`, `-review`, `-merge-intent`,
- *   `-merge`, `-state`)
+ *   `-merge`, `-state`, `-commit-message`, `-spawn`)
  * - Provides the reducer that rebuilds a task from those entries (`rebuild`), the same one that tracks it live (`applyEntry`)
  * - Provides the round budget, the `/factory start` payload check and the feedback texts the coder reads
  */
+import type { CommitMessage } from "./commitmsg.ts";
 import type { CommandResult } from "./run.ts";
 import { isRecord } from "./util.ts";
 
@@ -102,6 +103,14 @@ export interface MergeData {
 export interface MergeIntentData {
   commit: string;
   before: string;
+  /** The message of the merge commit. Absent on entries written before it existed. */
+  message?: CommitMessage;
+}
+
+/** A task the coder started with `factory_new_task` from a follow-up of this one. */
+export interface SpawnData {
+  id: string;
+  title: string;
 }
 
 export interface StateData {
@@ -125,9 +134,15 @@ export interface Snapshot {
   mergeIntent: MergeIntentData | null;
   /** The error of the last merge, when it failed. */
   mergeError: string | null;
+  /** The commit the last successful merge landed for the task (`MergeData.commit`). */
+  mergedCommit: string | null;
+  /** The coder's commit message for the next merge (`factory-commit-message`), null when the task title is used; a successful merge clears it. */
+  commitMessage: CommitMessage | null;
 }
 
 export const FEEDBACK_TYPE = "factory-feedback";
+/** The `custom_message` that asks the coder for the commit message once the last round passed. */
+export const COMMIT_ASK_TYPE = "factory-commit-ask";
 /** The prompt of `/factory retry`. */
 export const RETRY_PROMPT = "Continue the task. If a problem was reported above, fix it. Then stop.";
 const MERGE_FAILED_PROMPT_START = "The merge of the task failed: ";
@@ -142,6 +157,8 @@ export interface EntryData {
   "factory-merge-intent": MergeIntentData;
   "factory-merge": MergeData;
   "factory-state": StateData;
+  "factory-commit-message": CommitMessage;
+  "factory-spawn": SpawnData;
 }
 
 export type EntryType = keyof EntryData;
@@ -162,14 +179,22 @@ export interface FeedbackDraft {
   details: { round: number; trigger: Trigger };
 }
 
-export type Draft = EntryDraft | FeedbackDraft;
+export interface CommitAskDraft {
+  type: "custom_message";
+  customType: typeof COMMIT_ASK_TYPE;
+  content: string;
+  display: true;
+  details: { round: number };
+}
+
+export type Draft = EntryDraft | FeedbackDraft | CommitAskDraft;
 
 const RUN_TRIGGERS: readonly Trigger[] = ["start", "message", "retry"];
 
 type Reducer<K extends EntryType> = (snapshot: Snapshot | undefined, data: EntryData[K]) => Snapshot | undefined;
 
 const REDUCERS: { [K in EntryType]: Reducer<K> } = {
-  "factory-task": (_snapshot, task) => ({ task, state: "running", round: 0, runFirstRound: 1, reason: "", mergeIntent: null, mergeError: null }),
+  "factory-task": (_snapshot, task) => ({ task, state: "running", round: 0, runFirstRound: 1, reason: "", mergeIntent: null, mergeError: null, mergedCommit: null, commitMessage: null }),
   "factory-round": (snapshot, { round, trigger }) => {
     if (!snapshot) return undefined;
     const opensRun = RUN_TRIGGERS.includes(trigger) || (trigger === "conflict" && snapshot.state !== "running" && snapshot.state !== "merging");
@@ -178,8 +203,18 @@ const REDUCERS: { [K in EntryType]: Reducer<K> } = {
   "factory-gate": (snapshot) => snapshot,
   "factory-review": (snapshot) => snapshot,
   "factory-merge-intent": (snapshot, mergeIntent) => snapshot && { ...snapshot, mergeIntent },
-  "factory-merge": (snapshot, { ok, error }) => snapshot && { ...snapshot, mergeIntent: null, mergeError: ok ? null : error },
+  "factory-merge": (snapshot, { ok, error, commit }) =>
+    snapshot && {
+      ...snapshot,
+      mergeIntent: null,
+      mergeError: ok ? null : error,
+      mergedCommit: ok && commit ? commit : snapshot.mergedCommit,
+      // A message is the merge's own: a follow-up on the merged task gets asked for a new one.
+      commitMessage: ok ? null : snapshot.commitMessage,
+    },
   "factory-state": (snapshot, { state, reason }) => snapshot && { ...snapshot, state, reason, mergeIntent: null },
+  "factory-commit-message": (snapshot, commitMessage) => snapshot && { ...snapshot, commitMessage },
+  "factory-spawn": (snapshot) => snapshot,
 };
 
 export function isEntryType(value: string): value is EntryType {

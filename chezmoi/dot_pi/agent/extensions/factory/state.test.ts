@@ -37,7 +37,7 @@ describe("rebuild", () => {
       custom("factory-merge", { ok: true, commit: "def", error: null, depsSynced: false }),
       custom("factory-state", { state: "done", round: 1, reason: "merged" }),
     ]);
-    expect(done).toEqual({ task, state: "done", round: 1, runFirstRound: 1, reason: "merged", mergeIntent: null, mergeError: null });
+    expect(done).toEqual({ task, state: "done", round: 1, runFirstRound: 1, reason: "merged", mergeIntent: null, mergeError: null, mergedCommit: "def", commitMessage: null });
   });
 
   test("message and retry open a run with a fresh round budget", () => {

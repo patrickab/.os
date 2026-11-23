@@ -8,9 +8,13 @@
  *   is rebased onto its target branch first. A rebase that conflicts gets a `conflict` round, a merge gate that
  *   fails on the rebased branch a `gates` round: the coder resolves it and the task merges once that round passes
  * - A rebase the coder left open in the worktree goes back to the coder as a `conflict` round before anything runs
+ * - A passed round whose task title is not a conventional commit title first asks the coder for the commit message
+ *   (`askCommitMessage`, a `factory-commit-ask` message in the same run); `commitAnswerDrafts` turns the answer into
+ *   the `factory-commit-message` entry and the state the round passed into
  * - A hook or gate that exits `INFRA_EXIT` (75, EX_TEMPFAIL) says the environment is broken, not the change: the task
  *   ends `blocked`, `infra: <last output line>`, without feedback to the coder. A retry starts the next round once it is fixed
  */
+import { COMMIT_MESSAGE_PROMPT, commitMessageFallback, parseCommitMessage } from "./commitmsg.ts";
 import { protectedPaths, type FactoryConfig } from "./config.ts";
 import type { TaskDiff } from "./git.ts";
 import type { MergeOutcome } from "./merge.ts";
@@ -26,6 +30,8 @@ import {
   reviewFeedback,
   roundsUsed,
   stateDraft,
+  COMMIT_ASK_TYPE,
+  type CommitAskDraft,
   type Draft,
   type ReviewData,
   type Snapshot,
@@ -47,12 +53,30 @@ export interface PipelineSteps {
   merge(config: FactoryConfig): Promise<MergeOutcome>;
   /** The conflicting files of a rebase in progress in the task's worktree, null when none is. */
   openRebase(): Promise<string[] | null>;
+  /** True when a passed round asks the coder for the commit message before it ends. Absent: never. */
+  askCommitMessage?(): boolean;
 }
 
 export interface RoundResult {
   entries: Draft[];
   /** True when the entries end with feedback and the coder runs the next round. */
   continue: boolean;
+  /** Set when the entries end with the commit message ask: the state the round passed into, once answered. */
+  commitAsk?: State;
+}
+
+export function commitAskDraft(round: number): CommitAskDraft {
+  return { type: "custom_message", customType: COMMIT_ASK_TYPE, content: COMMIT_MESSAGE_PROMPT, display: true, details: { round } };
+}
+
+/**
+ * The entries after the coder answered the commit message ask of a round that passed into `passedInto`: the message
+ * (the task title when the answer is not a valid one) and that state, or a message round when a user message is queued.
+ */
+export function commitAnswerDrafts(snapshot: Snapshot, answer: string, passedInto: State, pendingMessages: boolean): RoundResult {
+  const message = parseCommitMessage(answer) ?? commitMessageFallback(snapshot.task.title);
+  const entries: Draft[] = [customDraft("factory-commit-message", message), stateDraft(passedInto, snapshot.round, "passed")];
+  return pendingMessages ? { entries: [...entries, ...messageRoundDrafts(snapshot.round)], continue: true } : { entries, continue: false };
 }
 
 /** Exit code of a hook or gate whose environment is broken (missing packages, tools, services): not the coder's to fix. */
@@ -166,7 +190,12 @@ export async function runRound(snapshot: Snapshot, steps: PipelineSteps): Promis
 
     // The message is about a change that is neither approved nor merged yet: it goes first.
     if (steps.pendingMessages()) return messageRound();
-    return end(task.settings.merge === "review" ? "waiting_approve" : "merging", "passed");
+    const passedInto: State = task.settings.merge === "review" ? "waiting_approve" : "merging";
+    if (steps.askCommitMessage?.()) {
+      drafts.push(commitAskDraft(round));
+      return { entries: drafts, continue: true, commitAsk: passedInto };
+    }
+    return end(passedInto, "passed");
   } catch (error) {
     return steps.cancelled() ? end("cancelled", "cancelled") : end("blocked", `pipeline_error: ${errorText(error)}`);
   }
