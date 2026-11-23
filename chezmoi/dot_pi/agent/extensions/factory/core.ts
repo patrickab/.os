@@ -8,6 +8,8 @@
  *   `failed` (anything else)
  * - A `repo` param is a path inside the repository, relative to the caller's `cwd` (absolute without one); an action
  *   that needs one and gets none uses `cwd`. The repository is its primary checkout. A task `id` may be a unique prefix
+ * - The models a task or repository may use are one user-level list (`models.ts`): `models.get`/`models.set`.
+ *   `tasks.start` and `settings.set` refuse a model not on it, and anything while it is empty; reads never check it
  * - `hostOnly` actions are for the host (pi-host), never offered to an agent: `tasks.import`
  * - Runners an action starts get the caller's `env` (default `process.env`): the host passes one without its secrets
  * - A task that checks its state and then acts on it holds the task lock (`tasks.ts`) from the check on; a runner it
@@ -39,6 +41,7 @@ import {
   type UnmergedWork,
 } from "./launch.ts";
 import { inboxReadPath, readFactoryStates, sessionFilePath, taskMainBranch } from "./runner.ts";
+import { loadModels, requireModels, saveModels } from "./models.ts";
 import { runCommand } from "./run.ts";
 import {
   DEFAULT_SETTINGS,
@@ -46,6 +49,7 @@ import {
   parseStoredSettings,
   registeredRepos,
   resolveRepoSettings,
+  resolveSettings,
   saveSettings,
   unregisterRepo,
   type ResolvedSettings,
@@ -99,7 +103,7 @@ export interface TaskView {
 
 export type TaskActionName = "tasks.approve" | "tasks.retry" | "tasks.cancel" | "tasks.remove" | "tasks.message";
 
-export type TimelineKind = "task" | "round" | "gate" | "review" | "merge" | "state" | "coder" | "user";
+export type TimelineKind = "task" | "round" | "gate" | "review" | "merge" | "state" | "coder" | "user" | "spawn";
 
 /** `coder`/`user` data is `{text}`; the others carry the `factory-*` entry's data unchanged. */
 export interface TimelineEntry {
@@ -138,6 +142,13 @@ function spec(summary: string, properties: Record<string, Schema>, required: str
 }
 
 export const ACTIONS = {
+  "models.get": spec("The factory models: the provider/model ids tasks and repository settings may use", {}, [], false),
+  "models.set": spec(
+    "Replace the factory models",
+    { models: { type: "array", items: { type: "string" }, description: "provider/model ids" } },
+    ["models"],
+    true,
+  ),
   "repos.list": spec("The registered repositories (those with a settings file)", {}, [], false),
   "repos.add": spec("Register a repository: give it a settings file", { repo: REPO }, ["repo"], true),
   "repos.remove": spec("Unregister a repository: remove its settings file", { repo: REPO }, ["repo"], true),
@@ -235,6 +246,7 @@ const TYPE_CHECKS: Record<string, (value: unknown) => boolean> = {
   boolean: (value) => typeof value === "boolean",
   integer: (value) => typeof value === "number" && Number.isInteger(value),
   object: (value) => isRecord(value),
+  array: (value) => Array.isArray(value),
 };
 
 /** The params checked against the action's schema (top-level keys only; unknown keys are dropped). */
@@ -251,7 +263,7 @@ function checkParams(name: ActionName, raw: unknown, cwd: string | undefined): P
       continue;
     }
     const type = String(schema.type);
-    if (!TYPE_CHECKS[type](value)) throw new FactoryError("invalid", `${name}: ${key} must be ${type === "integer" ? "an integer" : `a ${type}`}`);
+    if (!TYPE_CHECKS[type](value)) throw new FactoryError("invalid", `${name}: ${key} must be ${type === "integer" || type === "array" ? `an ${type}` : `a ${type}`}`);
     if (typeof schema.minimum === "number" && (value as number) < schema.minimum) throw new FactoryError("invalid", `${name}: ${key} must be at least ${schema.minimum}`);
     params[key] = value;
   }
@@ -529,6 +541,7 @@ const CUSTOM_KINDS: Record<string, TimelineKind | undefined> = {
   "factory-review": "review",
   "factory-merge": "merge",
   "factory-state": "state",
+  "factory-spawn": "spawn",
 };
 
 /** The entries of the session file's complete lines from byte `since` on; `next` is the end of the last one. */
@@ -583,6 +596,15 @@ async function settingsOf(repo: string): Promise<{ stored: StoredSettings; resol
   return { stored, resolved: resolveRepoSettings(stored, {}, branch), defaults: { ...DEFAULT_SETTINGS, models: {}, branch: fallback ?? branch } };
 }
 
+/** `requireModels` as a `refused` error. */
+async function requireFactoryModels(models: Settings["models"]): Promise<void> {
+  try {
+    await requireModels(models);
+  } catch (error) {
+    throw new FactoryError("refused", errorText(error));
+  }
+}
+
 function storedSettingsParam(raw: unknown, prefix: string): StoredSettings {
   try {
     return parseStoredSettings(raw);
@@ -592,6 +614,19 @@ function storedSettingsParam(raw: unknown, prefix: string): StoredSettings {
 }
 
 const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Promise<unknown>> = {
+  "models.get": async () => ({ models: await loadModels() }),
+
+  "models.set": async (params) => {
+    try {
+      await saveModels(params.models as string[]);
+    } catch (error) {
+      // A file system error (it has a code) is `failed`; a wrong id is the caller's.
+      if ((error as NodeJS.ErrnoException).code !== undefined) throw error;
+      throw new FactoryError("invalid", `models.set: ${errorText(error)}`);
+    }
+    return { models: await loadModels() };
+  },
+
   "repos.list": async () => ({ repos: await registeredRepos() }),
 
   "repos.add": async (params, { cwd }) => {
@@ -624,7 +659,9 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
 
   "settings.set": async (params, { cwd }) => {
     const repo = await primaryOf(params.repo as string, cwd);
-    await saveSettings(repo, storedSettingsParam(params.settings, "settings."));
+    const settings = storedSettingsParam(params.settings, "settings.");
+    await requireFactoryModels(settings.models ?? {});
+    await saveSettings(repo, settings);
     return settingsOf(repo);
   },
 
@@ -710,6 +747,7 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
       throw new FactoryError("invalid", errorText(error));
     }
     const repo = await primaryOf(params.repo as string, cwd);
+    await requireFactoryModels(resolveSettings(await loadSettings(repo), overrides, "").models);
     try {
       return taskView(await launchTask({ repo, title, request, overrides, signal, env }));
     } catch (error) {

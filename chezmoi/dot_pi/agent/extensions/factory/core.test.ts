@@ -118,7 +118,14 @@ beforeEach(() => {
   delete process.env.FAKE_PI_HOLD;
   delete process.env.FAKE_PI_START_END;
   rmSync(piLog, { force: true });
+  // Starting a task needs a factory models list; a test that wants none removes it.
+  mkdirSync(join(caseDir, "agent", "factory"), { recursive: true });
+  writeFileSync(modelsFile(), "- a/b\n- c/d\n");
 });
+
+function modelsFile(): string {
+  return join(caseDir, "agent", "factory", "models.yaml");
+}
 
 afterEach(async () => {
   for (const record of await listTasks()) await stopRunners(record);
@@ -219,6 +226,8 @@ describe("callAction", () => {
   test("ACTIONS names every action of the contract", () => {
     expect(Object.keys(ACTIONS).sort()).toEqual(
       [
+        "models.get",
+        "models.set",
         "repos.list",
         "repos.add",
         "repos.remove",
@@ -304,6 +313,53 @@ describe("repos", () => {
       env: process.env,
     });
     expect(JSON.parse(output.trim())).toEqual({ repos: [repo] });
+  });
+});
+
+describe("models", () => {
+  test("models.get reads the list, models.set replaces it deduplicated; an empty list reads as []", async () => {
+    expect(await callAction("models.get", {})).toEqual({ models: ["a/b", "c/d"] });
+    expect(await callAction("models.set", { models: ["x/y", "a/b", "x/y"] })).toEqual({ models: ["x/y", "a/b"] });
+    expect(await callAction("models.get", {})).toEqual({ models: ["x/y", "a/b"] });
+    expect(await callAction("models.set", { models: [] })).toEqual({ models: [] });
+    rmSync(modelsFile());
+    expect(await callAction("models.get", {})).toEqual({ models: [] });
+    expect(ACTIONS["models.get"].mutates).toBe(false);
+    expect(ACTIONS["models.set"].mutates).toBe(true);
+  });
+
+  test("models.set refuses a missing, mistyped or malformed list and keeps the old one", async () => {
+    await expectError(callAction("models.set", {}), "invalid", "models.set needs models");
+    await expectError(callAction("models.set", { models: "a/b" }), "invalid", "models.set: models must be an array");
+    await expectError(callAction("models.set", { models: ["sonnet"] }), "invalid", 'models.set: "sonnet" is not a provider/model id');
+    await expectError(callAction("models.set", { models: [4] }), "invalid", "models.set: 4 is not a provider/model id");
+    expect(await callAction("models.get", {})).toEqual({ models: ["a/b", "c/d"] });
+  });
+
+  test("an empty list: settings.set and tasks.start are refused naming /factory models, reads still work", async () => {
+    const repo = makeRepo();
+    rmSync(modelsFile());
+    const noModels = "no factory models are set (set them with /factory models)";
+    await expectError(callAction("settings.set", { repo, settings: { merge: "review" } }), "refused", noModels);
+    await expectError(callAction("tasks.start", { title: "t", request: "r" }, { cwd: repo }), "refused", noModels);
+    expect(((await callAction("settings.get", { repo })) as { stored: object }).stored).toEqual({});
+    expect(await callAction("tasks.list", {})).toEqual({ tasks: [] });
+    expect(await callAction("repos.add", { repo })).toEqual({ repo, repos: [repo] });
+    expect(await listTasks()).toEqual([]);
+  });
+
+  test("a model not on the list: settings.set and tasks.start (stored or override) are refused naming it", async () => {
+    const repo = makeRepo();
+    await expectError(callAction("settings.set", { repo, settings: { models: { coder: "a/b", reviewer: "z/z" } } }), "refused", "the reviewer model z/z is not a factory model");
+    await expectError(
+      callAction("tasks.start", { title: "t", request: "r", overrides: { models: { coder: "q/q" } } }, { cwd: repo }),
+      "refused",
+      "the coder model q/q is not a factory model (add it with /factory models add q/q)",
+    );
+    await callAction("settings.set", { repo, settings: { models: { coder: "c/d" } } });
+    await callAction("models.set", { models: ["a/b"] });
+    await expectError(callAction("tasks.start", { title: "t", request: "r" }, { cwd: repo }), "refused", "the coder model c/d is not a factory model");
+    expect(await listTasks()).toEqual([]);
   });
 });
 

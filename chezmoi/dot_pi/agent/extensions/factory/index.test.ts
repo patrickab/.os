@@ -106,7 +106,7 @@ function session(cwd: string, branch: Entry[] = []) {
     command: (args: string) => commandHandler(args, ctx),
     of: (customType: string) => entries.filter((entry) => entry.customType === customType).map((entry) => entry.data),
     start: (settings: Partial<Settings> = {}) =>
-      commandHandler(`start ${JSON.stringify({ request: "Add task.txt", title: "Add task file", settings: { branch: "main", merge: "auto", maxRounds: 3, review: false, models: {}, ...settings } })}`, ctx),
+      commandHandler(`start ${JSON.stringify({ request: "Add task.txt", title: "feat: add task file", settings: { branch: "main", merge: "auto", maxRounds: 3, review: false, models: {}, ...settings } })}`, ctx),
     /** The boundary after a coder turn. Pi commits the drafts it returns, so they join the entries. */
     boundary: async () => {
       const result = ((await emit("agent_before_settle", { outcome: "completed", entries: [] })) ?? { entries: [] }) as { entries: Draft[]; continue?: boolean };
@@ -286,7 +286,7 @@ describe("a task that waits for approve", () => {
     await pi.until("done/merged");
 
     expect(pi.of("factory-merge")).toEqual([{ ok: true, commit: gitIn(repo, "rev-parse", "main"), error: null, depsSynced: false }]);
-    expect(gitIn(repo, "log", "--format=%s", "main")).toBe("Add task file\nbase");
+    expect(gitIn(repo, "log", "--format=%s", "main")).toBe("feat: add task file\nbase");
     const liveness = pi.statuses.filter(([key]) => key === "session-liveness").map(([, text]) => text);
     expect(liveness.slice(0, 2)).toEqual(["round 1: merge", "round 1: merge, commit"]);
     expect(liveness).toContain("round 1: merge, fast-forward");
@@ -369,7 +369,7 @@ describe("a task and its target branch (B7)", () => {
     await pi.settled();
     await pi.until("done/merged");
     expect(pi.of("factory-merge")).toMatchObject([{ ok: true, commit: gitIn(repo, "rev-parse", "release"), depsSynced: false }]);
-    expect(gitIn(repo, "log", "--format=%s", "release")).toBe("Add task file\nbase");
+    expect(gitIn(repo, "log", "--format=%s", "release")).toBe("feat: add task file\nbase");
     expect(gitIn(repo, "log", "--format=%s", "main")).toBe("base");
     expect(gitIn(repo, "symbolic-ref", "--short", "HEAD")).toBe("main");
     expect(gitIn(repo, "status", "--porcelain")).toBe("");
@@ -394,7 +394,7 @@ describe("a task and its target branch (B7)", () => {
     expect(await pi.emit("input", { text: "go on" })).toBeUndefined();
     await pi.emit("before_agent_start", userEvent());
     expect(pi.states().at(-1)).toBe("running/message");
-    expect(gitIn(worktree, "log", "--format=%s")).toBe("Add task file\nbase");
+    expect(gitIn(worktree, "log", "--format=%s")).toBe("feat: add task file\nbase");
     expect(gitIn(worktree, "status", "--porcelain")).toBe("");
   });
 
@@ -418,7 +418,7 @@ describe("a task and its target branch (B7)", () => {
     expect(await pi.emit("input", { text: "go on" })).toBeUndefined();
     expect(await pi.emit("before_agent_start", userEvent())).toBeUndefined();
     expect(pi.states().at(-1)).toBe("running/message");
-    expect(gitIn(worktree, "log", "--format=%s")).toBe("Add task file\nmain edit\nbase");
+    expect(gitIn(worktree, "log", "--format=%s")).toBe("feat: add task file\nmain edit\nbase");
     expect(gitIn(worktree, "show", "--format=", "--name-only", "HEAD")).toBe("z.txt");
   });
 
@@ -435,7 +435,7 @@ describe("a task and its target branch (B7)", () => {
     expect(await pi.emit("input", { text: "more" })).toBeUndefined();
     expect(await pi.emit("before_agent_start", userEvent())).toBeUndefined();
     expect(pi.states().at(-1)).toBe("running/message");
-    expect(gitIn(worktree, "log", "--format=%s")).toBe("Add task file\nother\nbase");
+    expect(gitIn(worktree, "log", "--format=%s")).toBe("feat: add task file\nother\nbase");
     expect(gitIn(worktree, "status", "--porcelain")).toBe("");
   });
 
