@@ -289,13 +289,6 @@ Long tool output degrades later reasoning and hides the current state from the u
 - A filter must not swallow what matters by mistake: errors and unexpected output still have to come through.
 - Before a long-running task, check with a short run that it produces the expected output, so it does not fail late.
 
-### Waiting
-
-- **Wait on a signal, never on a clock**: when a process, job or subagent can report that it finished (a wake-up, a blocking wait, a completion notice), end the turn or block on that. Never `sleep`, never poll on an interval. Poll only when nothing can signal (a remote job), then every 15 s.
-- **Bound every wait**: each launch and each wait gets a timeout, so a hang costs seconds or minutes, never the session. A timeout is a limit, not the way to wait.
-- **Keep bounds short**: size a timeout to what the step should take, not to the worst case. A step that should take seconds gets 30 s, not minutes. Too short costs one retry, too long costs the whole wait.
-- Subagents follow the same rules, in their commands, scripts and test drivers.
-
 ## 6. Documentation and repository context
 
 ### Writing standard
@@ -343,7 +336,6 @@ Long tool output degrades later reasoning and hides the current state from the u
 
 Run any process that may outlive one tool call or requires live/post-exit inspection (e.g. servers, watchers, builds, training) as a supervised process. Foreground commands that finish within one tool call may run normally.
 
-- Waiting for a process follows "Waiting" in section 5.
 - NEVER infer process state from logs or artifacts.
 
 **Pi**: the `interactive_shell` tool (skill `interactive-shell`; call `enable_interactive_shell` first when the tool is missing).
