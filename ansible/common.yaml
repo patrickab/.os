@@ -26,7 +26,7 @@
       - rsync
       # npm (pulls in nodejs): pi installs its npm: extensions with it.
       - npm
-      # sshpass: non-interactive password SSH for agents (e.g. cube1 via $SSH_CUBE_1).
+      # sshpass: non-interactive password SSH for agents (e.g. cube1 via $SSH_PW_CUBE1).
       - sshpass
       - "{{ 'xclip' if ansible_facts['os_family'] != 'RedHat' else 'xsel' }}"
       # Xvfb: virtual X server used by cc-clip's Codex clipboard bridge over SSH.
@@ -148,6 +148,7 @@
       - ffmpeg
       - lazygit
       - glab
+      - rtk
     state: latest
     path: /home/linuxbrew/.linuxbrew/bin
   become: no

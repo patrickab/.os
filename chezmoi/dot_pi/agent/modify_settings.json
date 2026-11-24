@@ -19,6 +19,8 @@
       "npm:pi-agent-browser-native"
       "npm:pi-web-access"
       "npm:@jangmanj/pi-hashline"
+      "npm:pi-lens"
+      "npm:pi-rtk-optimizer"
       (dict "source" "npm:@xynogen/pix-models" "extensions" (list)) -}}
 {{- $settings = setValueAtPath "packages" $packages $settings -}}
 {{- /* pi-subagents: one model per role (oracle judges, scout reads, worker writes, reviewer reviews). Unpinned roles run on the default instead of the parent's model. */ -}}
