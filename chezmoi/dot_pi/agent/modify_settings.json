@@ -7,8 +7,8 @@
 {{- $settings = setValueAtPath "theme" "oh-lucy-evening-custom" $settings -}}
 {{- $settings = setValueAtPath "hideThinkingBlock" true $settings -}}
 {{- $settings = setValueAtPath "outputPad" 0 $settings -}}
-{{- /* Codemode lets the model script other tools in JavaScript. A `+` list adds to Pi's default tools. */ -}}
-{{- $settings = setValueAtPath "defaultTools" (list "+codemode") $settings -}}
+{{- /* defaultTools guarantees these are declared with full descriptions; it does not hide others (direct extension tools stay active). A `+` list adds to Pi's default tools. Codemode lets the model script other tools; tool_search loads the rest. */ -}}
+{{- $settings = setValueAtPath "defaultTools" (list "+codemode" "+interactive_shell" "+tool_search") $settings -}}
 {{- /* Pi's packages, declared here: Pi installs a missing one when it starts. Add or remove a line, nothing else.
        pix-models is a source only (`extensions` empty): extensions/models-picker.ts loads it as /models, because its own
        extension patches Pi's JS and cannot override /model on the compiled binary. */ -}}
