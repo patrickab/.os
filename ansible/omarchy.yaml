@@ -116,3 +116,16 @@
         group: root
         mode: '0755'
       become: yes
+
+    # Default wallpaper: nexus-5.jpg from assets/ for the active theme
+    - name: Set nexus-5 as the default wallpaper
+      ansible.builtin.shell: |
+        set -euo pipefail
+        THEME="$(cat "$HOME/.local/state/omarchy/current/theme.name")"
+        HOOK="$HOME/.os/chezmoi/dot_config/omarchy/hooks/theme-set.d"
+        bash "$HOOK/executable_sync-asset-backgrounds.sh" "$THEME"
+        omarchy-theme-bg-set "$HOME/.config/omarchy/backgrounds/$THEME/nexus-5.jpg"
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: lookup('ansible.builtin.fileglob', ansible_facts['env']['HOME'] + '/.os/assets/nexus-5.jpg') | length > 0

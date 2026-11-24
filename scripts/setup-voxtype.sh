@@ -69,5 +69,6 @@ ssh "$GPU_HOST" cat whisper.cpp/samples/jfk.wav |
 echo
 ssh "$GPU_HOST" journalctl --user -u whisper-server -b --no-pager | grep -m1 -i 'vulkan.*nvidia\|ggml_vulkan: 0' || echo "WARNING: no Vulkan device in server log, running on CPU?"
 
-echo "==> Client: restart voxtype"
+echo "==> Client: ONNX binary (ml speaker diarization for scripts/record.sh), restart voxtype"
+voxtype setup onnx --status | grep -q 'Active engine: ONNX' || sudo voxtype setup onnx --enable
 systemctl --user restart voxtype
