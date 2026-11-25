@@ -7,6 +7,21 @@ description: Generate complementary system-overview, architecture, and module-ma
 
 Generate machine-readable repository context, then create or update three complementary Markdown context docs in `.docs/`. Do not generate docs unless requested. If asked to review or change this skill, perform that task instead.
 
+## 0. Choose the mode
+
+| Mode | When | What it does |
+|---|---|---|
+| **Incremental** (default) | all three docs exist and carry a `Generated from <hash>` line whose commit git still knows | updates only what the changes since that commit touch |
+| **Full** | a doc or its hash is missing, the user asks for it, or the change since the hash restructured the repository (most paths moved) | sections 1 to 6 as written |
+
+**Incremental run**
+
+1. `git diff --name-status <hash>..HEAD` plus `git status --short`: the changed, added, moved and deleted paths. Nothing relevant changed: move the provenance line, report, stop.
+2. Pack only those paths and what they import or are imported by where a contract crosses the boundary (section 3, with `--include`). Read original source for implementation-sensitive claims as in section 4.
+3. **Module map**: rebuild the tree from `git ls-files`, so added, moved and deleted files are right. Keep every unchanged file's line verbatim. Write the one line (what the file owns) only for changed and new files.
+4. **Architecture and system overview**: rewrite only the sections the changed paths belong to. Leave every other section byte-identical.
+5. Set all three provenance lines to the new hash and date. Sections 5 and 6 apply to what was rewritten.
+
 ## 1. Establish scope and provenance
 
 - Work from the repository root. Read existing `.docs/system-overview.md`, `.docs/architecture.md`, and `.docs/module-map.md` when present.
@@ -69,7 +84,7 @@ Add a short working-tree caveat when applicable.
 | --- | --- |
 | `.docs/system-overview.md` | User/concept orientation: purpose, terminology, capabilities, main workflows, prerequisites, and user-visible limitations |
 | `.docs/architecture.md` | Agent/system orientation: component interactions, data flow, persistence authority, integration contracts, trust boundaries, important failure/recovery semantics |
-| `.docs/module-map.md` | Code navigation: required ASCII file tree with concise directory/module responsibilities, source entry points, ownership boundaries, and where to make common changes |
+| `.docs/module-map.md` | Code navigation: required ASCII file tree (from `git ls-files`) with one line per file on what it owns, source entry points, ownership boundaries, and where to make common changes |
 
 - Use as much space as needed to preserve relevant information. Stay concise without imposing a token target or ceiling.
 - Apply the global documentation standard. Require the module-map ASCII tree and avoid duplicate explanations across files or formats. Link to the owning context doc instead.
@@ -77,6 +92,7 @@ Add a short working-tree caveat when applicable.
 - Every sentence must serve development or understanding of the codebase (global documentation standard, "Cut in particular"). Omit cosmetic UI details (sizes, pixels, placement, colors, theme tokens, spacing, animation), exhaustive symbol inventories, implementation history (removed features, one-off migrations, "no longer"/"any more"), generation metadata beyond the provenance header (Repomix version, file or token counts), and copies of rules owned by `AGENTS.md`, runbooks or style guides. Keep compatibility behavior that still runs.
 - Module-map tree lines name what a file owns in one line. Contract detail lives in architecture, not the tree.
 - Link to repository-maintained docs for setup/configuration/recovery commands. Keep generated context separate from runbooks. Discover optional guides through repository instructions rather than hard-coding their filenames here.
+- **Contract tokens survive a rewrite.** Before replacing a section, list the old text's status codes, error codes and strings, routes, env vars, JSON shapes, paths and commands. One missing from the new text is restored with its clause, unless its sentence was cosmetic, history or an inventory, or the source no longer has it.
 - Remove stale, contradictory, redundant, or irrelevant statements. Restore useful old facts missing from the pack only after checking their current source.
 - Only write `.docs/architecture.md`, `.docs/module-map.md`, and `.docs/system-overview.md` in the repository. Preserve maintained docs. Do not edit source, other docs, configuration, locks, or agent instructions. Do not commit unless explicitly requested.
 
