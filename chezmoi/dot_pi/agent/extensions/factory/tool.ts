@@ -58,8 +58,8 @@ export function registerFactoryTool(pi: ExtensionAPI): void {
     name: "factory",
     label: "Factory",
     description:
-      'Hand a self-contained coding task to a background factory run: it codes in its own git worktree, runs the repo\'s gates and merges when they pass. Use it in a git repository whose target branch has a committed factory.yaml; "tasks.start" returns at once with the task. Check on it later with "tasks.get" (or "tasks.list"), and use tasks.approve, tasks.retry, tasks.cancel, tasks.message and tasks.remove as its state asks.',
-    promptSnippet: "Run a self-contained coding task in the background in a git repo with a factory.yaml; check it later with tasks.get",
+      'Hand a self-contained coding task to a background factory run: it codes in its own git worktree, runs the repo\'s gates and merges when they pass. Use it in a git repository whose target branch has a committed factory.yaml; "tasks.start" returns at once with the task. Give related tasks one tag (path segments like "plugin/m1/w1"; default the system user) and filter "tasks.list" by a tag or its prefix. Instead of polling "tasks.get", block on "tasks.wait" (ids or tag): it answers once every watched task rests or one needs attention (waiting for approve, blocked, cancelled, interrupted), or at its timeout. Use tasks.approve, tasks.retry, tasks.cancel, tasks.message and tasks.remove as a task\'s state asks.',
+    promptSnippet: "Run a self-contained coding task in the background in a git repo with a factory.yaml; wait for it with tasks.wait or check it with tasks.get",
     // The runner's environment is known at load; a session that gets its task later is checked per call.
     parameters: factoryToolParameters(process.env[TASK_SESSION_ENV] === "1"),
     executionMode: "sequential",

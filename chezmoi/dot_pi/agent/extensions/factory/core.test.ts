@@ -5,12 +5,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { ACTIONS, callAction, FactoryError, type TaskView, type TimelineEntry } from "./core.ts";
 import { liveRunners, stopRunners, taskInboxPath } from "./launch.ts";
 import { lastFactoryState } from "./runner.ts";
-import { listTasks, lockTask, taskLogPath, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
+import { listTasks, lockTask, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
 
 const savedEnv = { ...process.env };
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "factory-core-test-")));
@@ -201,6 +201,7 @@ async function expectError(promise: Promise<unknown>, code: FactoryError["code"]
 
 const ID_1 = "abc10000-0000-4000-8000-000000000001";
 const ID_2 = "abc20000-0000-4000-8000-000000000002";
+const ID_3 = "abc30000-0000-4000-8000-000000000003";
 
 function fakeRecord(id: string, repo: string): TaskRecord {
   return {
@@ -212,6 +213,9 @@ function fakeRecord(id: string, repo: string): TaskRecord {
     sessionId: `session-${id}`,
     sessionDir: join(caseDir, "sessions"),
     createdAt: `2026-01-01T00:00:0${id.at(-1)}.000Z`,
+    tag: "team/a",
+    plan: null,
+    kind: "task",
   };
 }
 
@@ -247,6 +251,7 @@ describe("callAction", () => {
         "tasks.cancel",
         "tasks.remove",
         "tasks.message",
+        "tasks.wait",
       ].sort(),
     );
     expect(ACTIONS["tasks.get"].mutates).toBe(false);
@@ -459,6 +464,9 @@ describe("task reads", () => {
       branch: record.branch,
       title: record.title,
       createdAt: record.createdAt,
+      tag: "team/a",
+      plan: null,
+      kind: "task",
       sessionId: record.sessionId,
       sessionPath: path,
       state: "blocked",
@@ -800,5 +808,127 @@ describe("D review fixes", () => {
     } finally {
       rmSync(path, { force: true });
     }
+  });
+});
+
+describe("task tags", () => {
+  test("tasks.start: tag defaults to the system user, plan to null, kind is task; given ones are stored", async () => {
+    const repo = makeRepo();
+    const plain = (await callAction("tasks.start", { title: "Add b", request: "add b.txt" }, { cwd: repo })) as TaskView;
+    expect([plain.tag, plain.plan, plain.kind]).toEqual([userInfo().username, null, "task"]);
+    const tagged = (await callAction("tasks.start", { title: "Add c", request: "add c.txt", tag: "plugin/m1/w1", plan: "plan/plugin/m1/w1.md", kind: "task" }, { cwd: repo })) as TaskView;
+    expect([tagged.tag, tagged.plan, tagged.kind]).toEqual(["plugin/m1/w1", "plan/plugin/m1/w1.md", "task"]);
+    const stored = await recordOf(tagged);
+    expect([stored.tag, stored.plan, stored.kind]).toEqual(["plugin/m1/w1", "plan/plugin/m1/w1.md", "task"]);
+  }, 30_000);
+
+  test("tasks.start refuses a malformed tag, an empty plan and a kind other than task before any worktree", async () => {
+    const repo = makeRepo();
+    for (const tag of ["", "a//b", "/a", "a/", "a b", "ä"]) {
+      await expectError(callAction("tasks.start", { title: "t", request: "r", tag }, { cwd: repo }), "invalid", "is not segments of");
+    }
+    await expectError(callAction("tasks.start", { title: "t", request: "r", plan: " " }, { cwd: repo }), "invalid", "plan must not be empty");
+    await expectError(callAction("tasks.start", { title: "t", request: "r", kind: "merge_request" }, { cwd: repo }), "invalid", 'kind "merge_request" is not supported yet');
+    expect(await listTasks()).toEqual([]);
+    expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
+  });
+
+  test("a record written without tag, plan and kind still lists, with the defaults", async () => {
+    const { tag: _tag, plan: _plan, kind: _kind, ...old } = fakeRecord(ID_1, "/r");
+    mkdirSync(tasksDir(), { recursive: true });
+    writeFileSync(join(tasksDir(), `${ID_1}.json`), JSON.stringify(old));
+    const views = ((await callAction("tasks.list", {})) as { tasks: TaskView[] }).tasks;
+    expect(views.map((view) => [view.id, view.tag, view.plan, view.kind])).toEqual([[ID_1, userInfo().username, null, "task"]]);
+  });
+
+  test("tasks.list tag: the tag itself and the tags under it, not a longer segment", async () => {
+    await writeTask({ ...fakeRecord(ID_1, "/r"), tag: "a" });
+    await writeTask({ ...fakeRecord(ID_2, "/r"), tag: "a/b" });
+    await writeTask({ ...fakeRecord(ID_3, "/r"), tag: "ab" });
+    const ids = async (tag: string) => ((await callAction("tasks.list", { tag })) as { tasks: TaskView[] }).tasks.map((view) => view.id);
+    expect(await ids("a")).toEqual([ID_1, ID_2]);
+    expect(await ids("a/b")).toEqual([ID_2]);
+    expect(await ids("ab")).toEqual([ID_3]);
+    expect(await ids("a/b/c")).toEqual([]);
+    await expectError(callAction("tasks.list", { tag: "a/" }), "invalid", "is not segments of");
+  });
+});
+
+describe("tasks.wait", () => {
+  const stateEntry = (state: string) => ({ type: "custom", customType: "factory-state", timestamp: "t", data: { state, round: 1, reason: "r" } });
+
+  /** A task tagged `tag`: resting in `state`, or starting (no session file) without one. */
+  async function waitTask(id: string, tag: string, state?: string): Promise<TaskRecord> {
+    const record = { ...fakeRecord(id, "/r"), tag };
+    await writeTask(record);
+    if (state !== undefined) writeSession(record, [stateEntry(state)]);
+    return record;
+  }
+
+  type WaitResult = { tasks: TaskView[]; attention: string[]; timedOut: boolean };
+  const wait = async (params: object) => (await callAction("tasks.wait", params)) as WaitResult;
+
+  test("returns at once when every watched task rests; done needs no attention", async () => {
+    await waitTask(ID_1, "w", "done");
+    await waitTask(ID_2, "w", "cancelled");
+    const started = Date.now();
+    const result = await wait({ ids: [ID_1, ID_2.slice(0, 6)] });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect([result.tasks.map((view) => view.id), result.attention, result.timedOut]).toEqual([[ID_1, ID_2], [ID_2], false]);
+    const done = await wait({ ids: [ID_1] });
+    expect([done.attention, done.timedOut]).toEqual([[], false]);
+  });
+
+  test("returns when one task blocks while another has not finished", async () => {
+    await waitTask(ID_1, "w");
+    const blocking = await waitTask(ID_2, "w");
+    setTimeout(() => writeSession(blocking, [stateEntry("blocked")]), 300);
+    const result = await wait({ tag: "w", timeoutMs: 10_000 });
+    expect(result.attention).toEqual([ID_2]);
+    expect(result.timedOut).toBe(false);
+    expect(result.tasks.map((view) => [view.id, view.state])).toEqual([
+      [ID_1, null],
+      [ID_2, "blocked"],
+    ]);
+  });
+
+  test("tag: a task started during the wait is watched too", async () => {
+    await waitTask(ID_1, "w/x");
+    setTimeout(() => void waitTask(ID_2, "w/y", "waiting_approve"), 300);
+    const result = await wait({ tag: "w", timeoutMs: 10_000 });
+    expect([result.attention, result.timedOut]).toEqual([[ID_2], false]);
+  });
+
+  test("ignore leaves a task out of the watched ones", async () => {
+    await waitTask(ID_1, "w");
+    await waitTask(ID_2, "w", "done");
+    const result = await wait({ tag: "w", ignore: [ID_1] });
+    expect([result.tasks.map((view) => view.id), result.attention, result.timedOut]).toEqual([[ID_2], [], false]);
+  });
+
+  test("times out after timeoutMs while a task has not rested; no watched task answers at once", async () => {
+    await waitTask(ID_1, "w");
+    const started = Date.now();
+    const result = await wait({ ids: [ID_1], timeoutMs: 1_000 });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000);
+    expect([result.tasks.map((view) => view.id), result.attention, result.timedOut]).toEqual([[ID_1], [], true]);
+    expect(await wait({ tag: "nobody" })).toEqual({ tasks: [], attention: [], timedOut: false });
+  });
+
+  test("an abort ends the wait", async () => {
+    await waitTask(ID_1, "w");
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 200);
+    await expectError(callAction("tasks.wait", { ids: [ID_1] }, { signal: controller.signal }), "failed", "tasks.wait was aborted");
+  });
+
+  test("invalid: ids and tag both or neither, empty ids, a timeout out of bounds", async () => {
+    await waitTask(ID_1, "w", "done");
+    await expectError(wait({}), "invalid", "tasks.wait needs exactly one of ids and tag");
+    await expectError(wait({ ids: [ID_1], tag: "w" }), "invalid", "tasks.wait needs exactly one of ids and tag");
+    await expectError(wait({ ids: [""] }), "invalid", "ids must hold non-empty strings");
+    await expectError(wait({ ids: [ID_1], timeoutMs: 999 }), "invalid", "timeoutMs must be at least 1000");
+    await expectError(wait({ ids: [ID_1], timeoutMs: 3_600_001 }), "invalid", "timeoutMs must be at most 3600000");
+    expect(ACTIONS["tasks.wait"].mutates).toBe(false);
   });
 });

@@ -81,7 +81,7 @@ describe("follow-up on a merged task", () => {
     setUp([["b.txt", "b\n", "L1"]]);
     const sessions = join(scratch, `sessions-${counter}`);
     mkdirSync(sessions);
-    const own: TaskRecord = { id: "00000000-0000-0000-0000-000000000006", repo, worktree, branch: "task", title: "Add a", sessionId: "s6", sessionDir: sessions, createdAt: "2026-01-01T00:00:00Z" };
+    const own: TaskRecord = { id: "00000000-0000-0000-0000-000000000006", repo, worktree, branch: "task", title: "Add a", sessionId: "s6", sessionDir: sessions, createdAt: "2026-01-01T00:00:00Z", tag: "t", plan: null, kind: "task" };
     rmSync(worktree, { recursive: true, force: true });
     await restoreWorktree(own);
     expect(gitIn(worktree, "rev-parse", "--abbrev-ref", "HEAD")).toBe("task");

@@ -8,8 +8,10 @@
  *   then acts on it (spawns a runner, deletes the task) holds it, and a spawned runner holds it until it exits. The
  *   file holds `<pid> <start time>` of its holder; a holder that no longer runs (`hostLiveness`) leaves a stale lock
  *   the next `lockTask` takes over; a lock a live process holds is a `TaskBusyError`
+ * - A record written before `tag`, `plan` and `kind` existed reads with their defaults (`systemUser()`, null, `task`)
  */
 import { link, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { hostLiveness, procStart } from "./queue.ts";
 import { factoryHome } from "./settings.ts";
@@ -28,11 +30,39 @@ export interface TaskRecord {
   sessionDir: string;
   /** ISO timestamp. */
   createdAt: string;
+  /** Who or what the task belongs to: segments joined by `/` (`isTaskTag`), a group is a prefix of them. */
+  tag: string;
+  /** A memory_store path the task works from; the factory only stores it. */
+  plan: string | null;
+  kind: TaskKind;
 }
 
+export type TaskKind = "task" | "merge_request";
+
+const TASK_KINDS: readonly TaskKind[] = ["task", "merge_request"];
 const RECORD_KEYS = ["id", "repo", "worktree", "branch", "title", "sessionId", "sessionDir", "createdAt"] as const;
 /** The shape of `crypto.randomUUID()`: a task id never holds a path separator. */
 const TASK_ID = /^[0-9a-f-]{36}$/;
+const TAG = /^[A-Za-z0-9._@+-]+(\/[A-Za-z0-9._@+-]+)*$/;
+
+export function isTaskTag(tag: string): boolean {
+  return TAG.test(tag);
+}
+
+/** Whether `tag` is `group` or lies under it: `a` holds `a/b`, not `ab`. */
+export function tagInGroup(tag: string, group: string): boolean {
+  return tag === group || tag.startsWith(`${group}/`);
+}
+
+/** The tag of a task started without one: the system user's name. */
+export function systemUser(): string {
+  try {
+    return userInfo().username;
+  } catch {
+    // No passwd entry (a container with an arbitrary uid): the login the environment names.
+    return process.env.USER ?? process.env.LOGNAME ?? "user";
+  }
+}
 
 export function tasksDir(): string {
   return join(factoryHome(), "tasks");
@@ -57,9 +87,16 @@ export function parseTaskRecord(raw: unknown, id: string): TaskRecord {
     if (typeof raw[key] !== "string" || raw[key] === "") throw new Error(`${key} must be a non-empty string`);
   }
   if (raw.id !== id) throw new Error(`id ${String(raw.id)} is not the file's name`);
-  const record = {} as Record<(typeof RECORD_KEYS)[number], string>;
-  for (const key of RECORD_KEYS) record[key] = raw[key] as string;
-  return record;
+  // A defaulted tag is not checked: an odd user name must not hide every old task.
+  const tag = raw.tag ?? systemUser();
+  if (typeof tag !== "string" || (raw.tag != null && !isTaskTag(tag))) throw new Error(`tag ${JSON.stringify(tag)} is not segments of A-Z a-z 0-9 . _ @ + - joined by /`);
+  const plan = raw.plan ?? null;
+  if (plan !== null && (typeof plan !== "string" || plan.trim() === "")) throw new Error("plan must be a non-empty string or null");
+  const kind = raw.kind ?? "task";
+  if (!TASK_KINDS.includes(kind as TaskKind)) throw new Error(`kind must be one of ${TASK_KINDS.join(", ")}`);
+  const fields = {} as Record<(typeof RECORD_KEYS)[number], string>;
+  for (const key of RECORD_KEYS) fields[key] = raw[key] as string;
+  return { ...fields, tag, plan, kind: kind as TaskKind };
 }
 
 /** Temp file in the same directory + rename: a reader sees the old record or the new one, never half of one. */

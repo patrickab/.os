@@ -25,7 +25,7 @@ import { inboxReadPath, lastFactoryState, taskMainBranch } from "./runner.ts";
 import { CommandRunner, runCommand, type Exec } from "./run.ts";
 import { factoryHome, loadSettings, resolveSettings, type StoredSettings } from "./settings.ts";
 import type { Settings, StartPayload } from "./state.ts";
-import { handTaskLock, lockTask, removeTask, TaskBusyError, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
+import { handTaskLock, lockTask, removeTask, systemUser, TaskBusyError, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
 import { outputTail } from "./util.ts";
 
 // `import.meta.dirname`, not Bun's `import.meta.dir`: inside Pi the latter is not this directory, and a runner would not start.
@@ -136,6 +136,9 @@ export interface LaunchInput {
   title: string;
   request: string;
   overrides?: StoredSettings;
+  /** Default: `systemUser()`. */
+  tag?: string;
+  plan?: string | null;
   /** Aborting it before the runner is started kills the running hook and undoes the launch. */
   signal?: AbortSignal;
   /** The runner's environment. */
@@ -188,6 +191,9 @@ export async function launchTask(input: LaunchInput): Promise<TaskRecord> {
         sessionId: crypto.randomUUID(),
         sessionDir: join(factoryHome(), "sessions", repoDirName(repo)),
         createdAt: new Date().toISOString(),
+        tag: input.tag ?? systemUser(),
+        plan: input.plan ?? null,
+        kind: "task",
       };
       await writeTask(record);
       recorded = true;

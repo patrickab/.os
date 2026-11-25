@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { defaultBranch, deleteTask, launchTask, LaunchRefusedError, liveRunners, runnerSpawn, startCommand, taskInboxPath, unmergedWork } from "./launch.ts";
 import { resolveSettings, saveSettings } from "./settings.ts";
@@ -173,6 +173,7 @@ describe("launchTask", () => {
     expect(git(record.worktree, "rev-parse", "HEAD")).toBe(git(repo, "rev-parse", "feature"));
     expect(record.sessionDir).toBe(join(scratch, "agent", "factory", "sessions", `--${record.repo.slice(1).replaceAll("/", "-")}--`));
     expect(record.sessionId).not.toBe("");
+    expect([record.tag, record.plan, record.kind]).toEqual([userInfo().username, null, "task"]);
     expect(await listTasks()).toEqual([record]);
     await runnersEnded();
     // The fake pi exits before it answers: the runner that got the start command says so in the task's log.
@@ -183,8 +184,9 @@ describe("launchTask", () => {
     const repo = makeRepo("repo", "main");
     git(repo, "branch", "--quiet", "other");
     await saveSettings(repo, { branch: "missing" });
-    const record = await launchTask({ repo, title: "t", request: "r", overrides: { branch: "other" } });
+    const record = await launchTask({ repo, title: "t", request: "r", overrides: { branch: "other" }, tag: "team/w1", plan: "plan/team.md" });
     expect(git(record.worktree, "rev-parse", "HEAD")).toBe(git(repo, "rev-parse", "other"));
+    expect((await listTasks()).map((task) => [task.tag, task.plan, task.kind])).toEqual([["team/w1", "plan/team.md", "task"]]);
   });
 
   test("a target branch that does not exist locally: refused before any worktree", async () => {
@@ -312,7 +314,7 @@ describe("unmergedWork", () => {
     writeFileSync(join(caseDir, "t-wt", "x.txt"), "x\n");
     git(join(caseDir, "t-wt"), "add", "-A");
     git(join(caseDir, "t-wt"), "commit", "--quiet", "-m", "x");
-    const record = { id: "i", repo, worktree: join(caseDir, "t-wt"), branch: "t", title: "t", sessionId: "s", sessionDir: caseDir, createdAt: "x" };
+    const record = { id: "i", repo, worktree: join(caseDir, "t-wt"), branch: "t", title: "t", sessionId: "s", sessionDir: caseDir, createdAt: "x", tag: "t", plan: null, kind: "task" as const };
     expect(await unmergedWork(record, undefined)).toEqual({ commits: 1, dirty: false });
     expect(await unmergedWork(record, "main")).toEqual({ commits: 1, dirty: false });
   });

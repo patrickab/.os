@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { factoryHome } from "./settings.ts";
-import { listTasks, lockTask, removeTask, TaskBusyError, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
+import { isTaskTag, listTasks, lockTask, removeTask, systemUser, tagInGroup, TaskBusyError, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "factory-tasks-test-")));
 const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -35,6 +35,9 @@ function record(id: string, overrides: Partial<TaskRecord> = {}): TaskRecord {
     sessionId: `session-${id}`,
     sessionDir: join(scratch, "sessions"),
     createdAt: "2026-01-01T00:00:00.000Z",
+    tag: "team",
+    plan: null,
+    kind: "task",
     ...overrides,
   };
 }
@@ -75,6 +78,23 @@ describe("task records", () => {
     write("one", "one");
     await writeTask(record(ONE));
     expect((await listTasks()).map((task) => task.id)).toEqual([ONE]);
+  });
+
+  test("a record without tag, plan and kind reads with the defaults; a malformed stored one is skipped", async () => {
+    mkdirSync(tasksDir(), { recursive: true });
+    const { tag: _tag, plan: _plan, kind: _kind, ...old } = record(ONE);
+    writeFileSync(join(tasksDir(), `${ONE}.json`), JSON.stringify(old));
+    writeFileSync(join(tasksDir(), `${uuid(2)}.json`), JSON.stringify(record(uuid(2), { tag: "a//b" })));
+    writeFileSync(join(tasksDir(), `${uuid(3)}.json`), JSON.stringify({ ...record(uuid(3)), kind: "epic" }));
+    writeFileSync(join(tasksDir(), `${uuid(4)}.json`), JSON.stringify({ ...record(uuid(4)), plan: "" }));
+    expect(await listTasks()).toEqual([{ ...old, tag: userInfo().username, plan: null, kind: "task" }]);
+    expect(systemUser()).toBe(userInfo().username);
+  });
+
+  test("tags: segments joined by /, a group holds itself and the tags under it", () => {
+    for (const tag of ["a", "plugin/m1/w1", "x.y_z@h+1-2"]) expect(isTaskTag(tag)).toBe(true);
+    for (const tag of ["", "/a", "a/", "a//b", "a b", "ä"]) expect(isTaskTag(tag)).toBe(false);
+    expect([tagInGroup("a", "a"), tagInGroup("a/b", "a"), tagInGroup("ab", "a"), tagInGroup("a", "a/b")]).toEqual([true, true, false, false]);
   });
 
   test("removeTask removes the record, its log and its lock, and tolerates a missing one", async () => {

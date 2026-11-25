@@ -41,16 +41,27 @@ problems go back to the coder. A passed round merges into the target branch, or 
   `branches.list`, `settings.get|set` (`{stored, resolved, defaults}`; `preview` is a stored boolean only clients
   read), `config.get` (working copy, or a branch's committed `factory.yaml`, a draft when there is none),
   `config.write` (a registered repo; checked, not committed; replaces a file only with `overwrite: true`),
-  `tasks.list|get` (a `TaskView`: record fields, last state with its time, `running` = a live runner holds it,
+  `tasks.list|get` (a `TaskView`: record fields (`tag`, `plan`, `kind` included), last state with its time, `running` = a live runner holds it,
   `interrupted`, the task's settings, token and cost usage of coder and reviews, `actions` = the task actions the core
   accepts now), `tasks.timeline` (session entries as `{at, kind, data}`, `since`/`next` = a byte cursor, read from
-  `since` on), `tasks.diff` (base, patch, per-file added/removed lines), `tasks.start|approve|retry|cancel|remove|message`
+  `since` on), `tasks.diff` (base, patch, per-file added/removed lines), `tasks.start|approve|retry|cancel|remove|message`,
+  `tasks.wait`
+- `tasks.list {repo?, tag?}`: `tag` keeps the tasks whose tag is it or starts with `tag + "/"` (`a` holds `a/b`, not
+  `ab`)
+- `tasks.wait {ids?, tag?, ignore?, timeoutMs?}` (`mutates: false`): exactly one of `ids` (ids or unique prefixes,
+  resolved once) and `tag` (as in `tasks.list`, re-listed on every poll, so tasks started later count); `ignore` leaves
+  ids out; `timeoutMs` 1000..3600000, default 600000. A task rests when no runner lives and its state is
+  `waiting_approve`, `blocked`, `done` or `cancelled`, or it is interrupted; it needs attention when it rests and is not
+  `done`. Answers `{tasks, attention: ids, timedOut}` once every watched task rests, one needs attention, the timeout
+  passes or no task is watched; an abort fails it
 - `tasks.import` (`hostOnly`, `{record}`): registers a task record another store kept; an existing id stays. It refuses
   a record unless `repo` is a primary checkout and `worktree` one of its linked worktrees with `branch` checked out
 - A `repo` param is a path inside the repository, relative to the caller's `cwd`, which is also its default; without
   `cwd` it must be absolute. `id` accepts a unique prefix. Each action that checks a task's state and acts on it holds a
   per-task lock from the check on (a runner keeps it until it exits)
-- `tasks.start` (`title`, `request`, `overrides`): creates the worktree, runs `after_create`, spawns the runner and
+- `tasks.start` (`title`, `request`, `overrides`, `tag`, `plan`, `kind`): `tag` is path segments of
+  `[A-Za-z0-9._@+-]` joined by `/` (default the system user name), `plan` a memory_store path the factory only stores,
+  `kind` only `task` so far. It creates the worktree, runs `after_create`, spawns the runner and
   returns. An abort before the runner is spawned kills the hook and removes the worktree and branch
 - `tasks.approve` (from `waiting_approve`), `tasks.retry` (from `blocked`, `cancelled` or interrupted), `tasks.cancel`
   (stops a live runner first), `tasks.message` (a live runner gets it as a follow-up through the task's inbox, a
@@ -111,7 +122,8 @@ problems go back to the coder. A passed round merges into the target branch, or 
 
 ## Where state lives (`<agent dir>/factory/`, agent dir = `PI_CODING_AGENT_DIR` or `~/.pi/agent`)
 
-- `tasks/<id>.json`: the task record (repo, worktree, branch, title, session id and dir); `tasks/<id>.log`: runner
+- `tasks/<id>.json`: the task record (repo, worktree, branch, title, session id and dir, tag, plan, kind; a record
+  without the last three reads as the system user's, no plan, `task`); `tasks/<id>.log`: runner
   output; `tasks/<id>.lock`: `<pid> <start time>` of whoever acts on the task (a dead holder's lock is taken over); `tasks/<id>.inbox`:
   messages for the live runner (`<inbox>.read`: how far it sent them)
 - `sessions/<repo dir name>/` (`/a/b` -> `--a-b--`): the Pi session files of a repository's tasks, apart from

@@ -11,6 +11,8 @@
  * - The models a task or repository may use are one user-level list (`models.ts`): `models.get`/`models.set`.
  *   `tasks.start` and `settings.set` refuse a model not on it, and anything while it is empty; reads never check it
  * - `hostOnly` actions are for the host (pi-host), never offered to an agent: `tasks.import`
+ * - `tasks.wait` polls the watched tasks until they rest (no runner lives and the state is a resting one, or the task
+ *   is interrupted) or one needs attention (it rests and is not `done`): a supervisor's completion signal
  * - Runners an action starts get the caller's `env` (default `process.env`): the host passes one without its secrets
  * - A task that checks its state and then acts on it holds the task lock (`tasks.ts`) from the check on; a runner it
  *   spawns takes the lock over until it exits. `cancel` stops a live runner first: two Pi processes never share a session
@@ -56,7 +58,7 @@ import {
   type StoredSettings,
 } from "./settings.ts";
 import { isFactoryPrompt, messageText, parseSettingsFields, RESTING_STATES, type Settings, type State } from "./state.ts";
-import { listTasks, lockTask, parseTaskRecord, TaskBusyError, taskLogPath, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
+import { isTaskTag, listTasks, lockTask, parseTaskRecord, tagInGroup, TaskBusyError, taskLogPath, unlockTask, writeTask, type TaskKind, type TaskRecord } from "./tasks.ts";
 import { errorText, isRecord } from "./util.ts";
 
 export type FactoryErrorCode = "invalid" | "not_found" | "busy" | "refused" | "failed";
@@ -83,6 +85,9 @@ export interface TaskView {
   branch: string;
   title: string;
   createdAt: string;
+  tag: string;
+  plan: string | null;
+  kind: TaskKind;
   sessionId: string;
   sessionPath: string | null;
   state: State | null;
@@ -126,6 +131,9 @@ const SHORT_ID_CHARS = 8;
 
 const REPO: Schema = { type: "string", description: "A path inside the git repository. Default: the current directory" };
 const ID: Schema = { type: "string", description: "The task id or a unique prefix of it" };
+const TAG: Schema = { type: "string", description: "A task tag: segments of A-Z a-z 0-9 . _ @ + - joined by /" };
+const TAG_FILTER: Schema = { type: "string", description: "Only the tasks whose tag is this one or lies under it (a holds a/b, not ab)" };
+const WAIT_TIMEOUT_MS = { default: 600_000, minimum: 1_000, maximum: 3_600_000 };
 const SETTINGS_PROPERTIES: Record<string, Schema> = {
   merge: { type: "string", enum: ["auto", "review"], description: "auto: merge a passed round. review: wait for approve" },
   maxRounds: { type: "integer", minimum: 1, maximum: 20 },
@@ -176,11 +184,16 @@ export const ACTIONS = {
     ["repo", "text"],
     true,
   ),
-  "tasks.list": spec("Every task, or the repository's", { repo: { type: "string", description: "Only the tasks of this repository" } }, [], false),
+  "tasks.list": spec("Every task, or the repository's", { repo: { type: "string", description: "Only the tasks of this repository" }, tag: TAG_FILTER }, [], false),
   "tasks.get": spec("One task", { id: ID }, ["id"], false),
   "tasks.import": spec(
     "Register a task another store kept: its record as the core writes them; an existing id stays unchanged. The worktree must be a linked worktree of repo (its primary checkout) on branch",
-    { record: { type: "object", description: "id, repo, worktree, branch, title, sessionId, sessionDir, createdAt: non-empty strings" } },
+    {
+      record: {
+        type: "object",
+        description: "id, repo, worktree, branch, title, sessionId, sessionDir, createdAt: non-empty strings; optional tag (default the system user), plan (string or null), kind (task or merge_request)",
+      },
+    },
     ["record"],
     true,
     true,
@@ -199,9 +212,23 @@ export const ACTIONS = {
       title: { type: "string", description: "A short title of the task" },
       request: { type: "string", description: "The full, self-contained task for the coder" },
       overrides: { type: "object", description: "Settings over the repository's stored ones", properties: SETTINGS_PROPERTIES },
+      tag: { ...TAG, description: `${String(TAG.description)}. Default: the system user` },
+      plan: { type: "string", description: "The memory_store path of the plan the task works from (only stored)" },
+      kind: { type: "string", enum: ["task"], description: "Default: task" },
     },
     ["repo", "title", "request"],
     true,
+  ),
+  "tasks.wait": spec(
+    "Wait until the watched tasks rest (no runner, state waiting_approve, blocked, done or cancelled, or interrupted) or one needs attention (it rests, not done), or the timeout passes. Answers {tasks, attention: ids, timedOut}",
+    {
+      ids: { type: "array", items: { type: "string" }, description: "Watch these tasks (ids or unique prefixes); give ids or tag" },
+      tag: { ...TAG_FILTER, description: "Watch the tasks whose tag is this one or lies under it, those started during the wait too; give ids or tag" },
+      ignore: { type: "array", items: { type: "string" }, description: "Task ids (or prefixes) left out of the watched ones" },
+      timeoutMs: { type: "integer", minimum: WAIT_TIMEOUT_MS.minimum, maximum: WAIT_TIMEOUT_MS.maximum, description: `Default: ${WAIT_TIMEOUT_MS.default}` },
+    },
+    [],
+    false,
   ),
   "tasks.approve": spec("Merge a task waiting for approve", { id: ID }, ["id"], true),
   "tasks.retry": spec("Another round on a blocked, cancelled or interrupted task", { id: ID }, ["id"], true),
@@ -265,6 +292,7 @@ function checkParams(name: ActionName, raw: unknown, cwd: string | undefined): P
     const type = String(schema.type);
     if (!TYPE_CHECKS[type](value)) throw new FactoryError("invalid", `${name}: ${key} must be ${type === "integer" || type === "array" ? `an ${type}` : `a ${type}`}`);
     if (typeof schema.minimum === "number" && (value as number) < schema.minimum) throw new FactoryError("invalid", `${name}: ${key} must be at least ${schema.minimum}`);
+    if (typeof schema.maximum === "number" && (value as number) > schema.maximum) throw new FactoryError("invalid", `${name}: ${key} must be at most ${schema.maximum}`);
     params[key] = value;
   }
   return params;
@@ -383,6 +411,9 @@ async function taskView(record: TaskRecord): Promise<TaskView> {
     branch: record.branch,
     title: record.title,
     createdAt: record.createdAt,
+    tag: record.tag,
+    plan: record.plan,
+    kind: record.kind,
     sessionId: record.sessionId,
     sessionPath,
     state: last?.state ?? null,
@@ -416,6 +447,16 @@ function taskActions(view: Omit<TaskView, "actions">): TaskActionName[] {
     "tasks.message": view.state !== null && view.state !== "merging",
   };
   return (Object.keys(allowed) as TaskActionName[]).filter((name) => allowed[name]);
+}
+
+/** No runner lives and nothing moves the task on by itself: its state is a resting one, or it is interrupted. */
+function rests(view: TaskView): boolean {
+  return !view.running && (view.interrupted || (view.state !== null && RESTING_STATES.includes(view.state)));
+}
+
+/** It rests and waits for someone: every resting state but `done`. */
+function needsAttention(view: TaskView): boolean {
+  return rests(view) && view.state !== "done";
 }
 
 function stateText(view: TaskView): string {
@@ -565,6 +606,63 @@ async function readTimeline(record: TaskRecord, since: number): Promise<{ entrie
   return { entries, next: since + end };
 }
 
+/** A tag param, `invalid` unless it is segments joined by `/` (`isTaskTag`). */
+function tagParam(name: ActionName, value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !isTaskTag(value)) throw new FactoryError("invalid", `${name}: tag ${JSON.stringify(value)} is not segments of A-Z a-z 0-9 . _ @ + - joined by /`);
+  return value;
+}
+
+/** An array param of non-empty strings, `invalid` otherwise. */
+function stringsParam(name: ActionName, key: string, value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  const strings = value as unknown[];
+  if (strings.some((item) => nonEmpty(item) === undefined)) throw new FactoryError("invalid", `${name}: ${key} must hold non-empty strings`);
+  return (strings as string[]).map((item) => item.trim());
+}
+
+/** The tasks of `repo` (every repository's without), only those in the tag group `tag` when given. */
+async function tasksIn(repo: string | undefined, tag: string | undefined): Promise<TaskRecord[]> {
+  const records = await listTasks(repo);
+  return tag === undefined ? records : records.filter((record) => tagInGroup(record.tag, tag));
+}
+
+const WAIT_POLL_MS = 500;
+
+/** `tasks.wait`: polls the watched tasks until all rest, one needs attention, the deadline passes or none is watched. */
+async function waitForTasks(
+  watched: () => Promise<TaskRecord[]>,
+  ignore: string[],
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+): Promise<{ tasks: TaskView[]; attention: string[]; timedOut: boolean }> {
+  const deadline = Date.now() + timeoutMs;
+  const ignored = (record: TaskRecord) => ignore.some((prefix) => record.id.startsWith(prefix));
+  while (true) {
+    if (signal?.aborted) throw new FactoryError("failed", "tasks.wait was aborted");
+    const tasks = await Promise.all((await watched()).filter((record) => !ignored(record)).map(taskView));
+    const attention = tasks.filter(needsAttention).map((view) => view.id);
+    if (tasks.every(rests) || attention.length > 0) return { tasks, attention, timedOut: false };
+    if (Date.now() >= deadline) return { tasks, attention, timedOut: true };
+    await abortableSleep(Math.min(WAIT_POLL_MS, deadline - Date.now()), signal);
+  }
+}
+
+/** Sleeps `ms`, less when `signal` aborts first. */
+async function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  await new Promise<void>((done) => {
+    const wake = () => {
+      clearTimeout(timer);
+      done();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", wake);
+      done();
+    }, ms);
+    signal?.addEventListener("abort", wake, { once: true });
+  });
+}
+
 /** How long a cancel or retry of an interrupted task waits for its runner to write a state or end. */
 const RUNNER_START_WAIT_MS = 15_000;
 
@@ -699,8 +797,23 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
   },
 
   "tasks.list": async (params, { cwd }) => {
+    const tag = tagParam("tasks.list", params.tag);
     const repo = params.repo === undefined ? undefined : await primaryOf(params.repo as string, cwd);
-    return { tasks: await Promise.all((await listTasks(repo)).map(taskView)) };
+    return { tasks: await Promise.all((await tasksIn(repo, tag)).map(taskView)) };
+  },
+
+  "tasks.wait": async (params, { signal }) => {
+    const ids = stringsParam("tasks.wait", "ids", params.ids);
+    const tag = tagParam("tasks.wait", params.tag);
+    if ((ids === undefined) === (tag === undefined)) throw new FactoryError("invalid", "tasks.wait needs exactly one of ids and tag");
+    const ignore = stringsParam("tasks.wait", "ignore", params.ignore) ?? [];
+    const timeoutMs = (params.timeoutMs as number | undefined) ?? WAIT_TIMEOUT_MS.default;
+    if (ids !== undefined) {
+      // Ids are resolved once: a prefix that turns ambiguous later must not end the wait.
+      const records = await Promise.all(ids.map(findTask));
+      return waitForTasks(async () => records, ignore, timeoutMs, signal);
+    }
+    return waitForTasks(() => tasksIn(undefined, tag), ignore, timeoutMs, signal);
   },
 
   "tasks.get": async (params) => taskView(await findTask(params.id)),
@@ -740,6 +853,10 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
     const request = nonEmpty(params.request);
     if (title === undefined) throw new FactoryError("invalid", "tasks.start needs a title that is not empty");
     if (request === undefined) throw new FactoryError("invalid", "tasks.start needs a request that is not empty");
+    const tag = tagParam("tasks.start", params.tag);
+    if (params.plan !== undefined && nonEmpty(params.plan) === undefined) throw new FactoryError("invalid", "tasks.start: plan must not be empty");
+    const plan = params.plan as string | undefined;
+    if (params.kind !== undefined && params.kind !== "task") throw new FactoryError("invalid", `tasks.start: kind ${JSON.stringify(params.kind)} is not supported yet`);
     let overrides: StoredSettings = {};
     try {
       if (params.overrides !== undefined) overrides = parseSettingsFields(params.overrides as Params, "overrides.");
@@ -749,7 +866,7 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
     const repo = await primaryOf(params.repo as string, cwd);
     await requireFactoryModels(resolveSettings(await loadSettings(repo), overrides, "").models);
     try {
-      return taskView(await launchTask({ repo, title, request, overrides, signal, env }));
+      return taskView(await launchTask({ repo, title, request, overrides, tag, plan, signal, env }));
     } catch (error) {
       if (error instanceof LaunchRefusedError) throw new FactoryError("refused", error.message);
       throw error;

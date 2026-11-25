@@ -51,6 +51,16 @@ describe("factoryToolParameters", () => {
     expect(parameters.properties.overrides.properties).toBeDefined();
   });
 
+  test("the tool describes tags and tasks.wait", () => {
+    const tool = registered();
+    expect(tool.description).toContain("tasks.wait");
+    expect(tool.description).toContain("tag");
+    expect(tool.promptSnippet).toContain("tasks.wait");
+    const { properties } = factoryToolParameters();
+    expect(String(properties.tag.description)).toContain("tasks.wait: ");
+    expect(properties.timeoutMs.maximum).toBe(3_600_000);
+  });
+
   test("a param several actions share names them; one with different meanings names each", () => {
     const { properties } = factoryToolParameters();
     expect(String(properties.id.description)).toContain("tasks.get, ");
@@ -117,6 +127,7 @@ describe("the factory tool in a task session", () => {
     expect(agentActions(true)).toEqual(readOnly);
     expect(factoryToolParameters(true).properties.action.enum).toEqual(readOnly);
     expect(readOnly).toContain("tasks.get");
+    expect(readOnly).toContain("tasks.wait");
     expect(readOnly).not.toContain("tasks.start");
   });
 

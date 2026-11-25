@@ -419,6 +419,9 @@ describe("sendCommand", () => {
       sessionId: c.sessionId,
       sessionDir: c.sessionDir,
       createdAt: new Date().toISOString(),
+      tag: "t",
+      plan: null,
+      kind: "task",
     };
     await lockTask(record.id);
     await sendCommand(record, "/factory approve");
@@ -446,6 +449,9 @@ describe("messageTask", () => {
       sessionId: c.sessionId,
       sessionDir: c.sessionDir,
       createdAt: new Date().toISOString(),
+      tag: "t",
+      plan: null,
+      kind: "task",
     };
   }
 
