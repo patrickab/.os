@@ -5,12 +5,14 @@
  * - Provides the task's git identity (`taskGit`), its primary checkout, the snapshot of a working tree as a tree id
  *   (`snapshotTree`), the task's diff base and its diff (changed paths and patch, untracked files included)
  * - Provides the checks a merge needs before it writes: the checkout is on its branch with no git operation in
- *   progress (`assertCheckoutReady`), and whether tracked files differ from HEAD (`trackedChanges`). Tells a rebase
+ *   progress (`assertCheckoutReady`), and whether tracked files differ from HEAD (`trackedChanges`). Tells whether a
+ *   worktree holds anything but HEAD's tree (`uncommittedFiles`) and removes its untracked files (`removeUntracked`),
+ *   both leaving ignored files alone. Tells a rebase
  *   in progress and its conflicting files (`rebaseInProgress`), and aborts one a killed merge left behind
  *   (`abortLeftoverRebase`)
  * - Provides the added and removed lines per changed path (`diffFileCounts`)
  * - Provides where the task's own change starts (`taskBase`) and whether its target branch moved past it (`targetMoved`)
- * - Nothing here writes the checkout's own index or its files: staging goes through a scratch index
+ * - Nothing here but `removeUntracked` writes the checkout's own index or its files: staging goes through a scratch index
  */
 import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
@@ -152,6 +154,16 @@ export async function rebaseInProgress(exec: Exec, root: string): Promise<string
 /** True when tracked files in `root` differ from HEAD, staged or not. Untracked files do not count. */
 export async function trackedChanges(exec: Exec, root: string): Promise<boolean> {
   return (await git(exec, root, ["status", "--porcelain", "--untracked-files=no"])) !== "";
+}
+
+/** True when `root` holds anything but HEAD's tree: tracked files that differ, or untracked files that are not ignored. */
+export async function uncommittedFiles(exec: Exec, root: string): Promise<boolean> {
+  return (await git(exec, root, ["status", "--porcelain"])) !== "";
+}
+
+/** Deletes the untracked files of `root` that are not ignored. Never `-x`: ignored files (caches, deps) stay. */
+export async function removeUntracked(exec: Exec, root: string): Promise<void> {
+  await git(exec, root, ["clean", "-fdq"]);
 }
 
 /** Aborts a rebase that a killed merge left behind in `root`. `exec` must be one a cancel does not stop. */

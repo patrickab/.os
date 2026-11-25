@@ -1040,6 +1040,21 @@ describe("merge requests", () => {
     expect(await listTasks()).toEqual([]);
   });
 
+  test("tasks.diff of a merge request shows its commits only, the tree its reviewer saw, not its worktree's leftovers (review 3, minor 3)", async () => {
+    const repo = waveRepo();
+    const record = await recordOf((await mergeRequest(repo)) as TaskView);
+    await until(async () => (await stateOf(record)) === "waiting_approve");
+    await until(() => runnerEnded(record));
+    writeFileSync(join(record.worktree, "w.txt"), "edited\n");
+    writeFileSync(join(record.worktree, "stray.txt"), "stray\n");
+    const diff = (await callAction("tasks.diff", { id: record.id })) as { base: string; diff: string; files: object[] };
+    expect(diff.base).toBe(git(repo, "rev-parse", "main"));
+    expect(diff.files).toEqual([{ path: "w.txt", added: 1, removed: 0 }]);
+    expect(diff.diff).toContain("+w");
+    expect(diff.diff).not.toContain("edited");
+    expect(diff.diff).not.toContain("stray.txt");
+  });
+
   test("a forced remove in the middle of a rebase in its worktree keeps the source branch where it was (m7)", async () => {
     const repo = waveRepo();
     const wave = git(repo, "rev-parse", "wave");

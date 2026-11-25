@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -632,6 +632,20 @@ describe("factory_ask_supervisor", () => {
   });
 });
 
+test("an ordinary task still commits its untracked files, a gate's output too, and nothing removes them (review 3, finding 1)", async () => {
+  writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [sh, -c, 'echo x > gate-output.txt']\n");
+  gitIn(repo, "commit", "--quiet", "-am", "gate writes a file");
+  const worktree = addTaskWorktree();
+  const pi = session(worktree);
+  await pi.start();
+  writeFileSync(join(worktree, "task.txt"), "task\n");
+  await pi.boundary();
+  await pi.settled();
+  await pi.until("done/merged");
+  expect(gitIn(repo, "ls-tree", "--name-only", "main").split("\n")).toEqual(expect.arrayContaining(["gate-output.txt", "task.txt"]));
+  expect(gitIn(worktree, "status", "--porcelain")).toBe("");
+});
+
 describe("a merge request", () => {
   const savedPath = process.env.PATH;
   const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -824,7 +838,7 @@ echo "{\\"type\\":\\"tool_execution_end\\",\\"toolName\\":\\"submit_verdict\\",\
     expect(gitIn(worktree, "status", "--porcelain")).toBe("M wave.txt");
   });
 
-  test("a file a gate leaves untracked is neither reviewed nor merged: main gets the source's commits only (m2)", async () => {
+  test("a file a gate leaves untracked is removed after the gates, neither reviewed nor merged: main gets the source's commits only (m2)", async () => {
     writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [sh, -c, 'echo x > gate-output.txt']\n");
     gitIn(repo, "commit", "--quiet", "-am", "gate writes a file");
     const worktree = waveWorktree();
@@ -832,7 +846,7 @@ echo "{\\"type\\":\\"tool_execution_end\\",\\"toolName\\":\\"submit_verdict\\",\
     await startMergeRequest(pi);
     await pi.until("done/merged");
     expect(gitIn(repo, "log", "--format=%s", "main")).toBe("feat: wave two\nfeat: wave one\ngate writes a file\nbase");
-    expect(gitIn(worktree, "status", "--porcelain")).toBe("?? gate-output.txt");
+    expect(gitIn(worktree, "status", "--porcelain")).toBe("");
     const patch = readFileSync(join(process.env.PI_CODING_AGENT_DIR!, "factory-reviews", "test-session", "round-1.patch"), "utf8");
     expect([patch.includes("wave.txt"), patch.includes("gate-output.txt")]).toEqual([true, false]);
   });
@@ -892,6 +906,70 @@ echo "{\\"type\\":\\"tool_execution_end\\",\\"toolName\\":\\"submit_verdict\\",\
     await pi.until("done/merged");
     expect(gitIn(repo, "log", "--format=%s", "-1", "main")).toBe("fix: add fixed.txt");
     expect(gitIn(repo, "ls-tree", "--name-only", "main")).not.toContain("out.log");
+  });
+
+  test("a gate's leftover is gone after the gate failed, and the retry is not dirty (review 3, finding 1)", async () => {
+    writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [sh, -c, 'mkdir -p out && echo x > out/run.log; test -f fixed.txt']\n");
+    gitIn(repo, "commit", "--quiet", "-am", "gate needs fixed.txt");
+    const worktree = waveWorktree();
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("blocked/gates");
+    expect([existsSync(join(worktree, "out")), gitIn(worktree, "status", "--porcelain")]).toEqual([false, ""]);
+    writeFileSync(join(worktree, "fixed.txt"), "fixed\n");
+    gitIn(worktree, "add", "fixed.txt");
+    gitIn(worktree, "commit", "--quiet", "-m", "fix: add fixed.txt");
+    await pi.command("retry");
+    await pi.until("done/merged");
+    expect(pi.states()).toEqual(["running/start", "blocked/gates", "running/retry", "merging/passed", "done/merged"]);
+  });
+
+  test("a file the owner forgot to git add blocks the retry as dirty and stays: the gates never pass on it (review 3, finding 1)", async () => {
+    writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [sh, -c, 'test ! -f wave.txt || test -f helper.txt']\n");
+    gitIn(repo, "commit", "--quiet", "-am", "wave.txt needs helper.txt");
+    const main = gitIn(repo, "rev-parse", "main");
+    const worktree = waveWorktree();
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("blocked/gates");
+    // The source is checked out in the merge request's worktree only, so its owner fixes it there.
+    writeFileSync(join(worktree, "helper.txt"), "helper\n");
+    writeFileSync(join(worktree, "wave.txt"), "hello, uses helper\n");
+    gitIn(worktree, "commit", "--quiet", "-am", "fix: use helper");
+    await pi.command("retry");
+    await pi.until("blocked/dirty");
+    expect(pi.states()).toEqual(["running/start", "blocked/gates", "running/retry", "blocked/dirty"]);
+    expect(pi.of("factory-gate")).toHaveLength(1);
+    expect(gitIn(repo, "rev-parse", "main")).toBe(main);
+    expect(readFileSync(join(worktree, "helper.txt"), "utf8")).toBe("helper\n");
+  });
+
+  test("an ignored file neither blocks it nor is removed, whether a person or a gate put it there (review 3, finding 1)", async () => {
+    writeFileSync(join(repo, ".gitignore"), "*.cache\n");
+    writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [sh, -c, 'echo x > gate.cache']\nmerge_gates:\n  - [sh, -c, 'echo x > merge.cache']\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "ignore caches");
+    const worktree = waveWorktree();
+    writeFileSync(join(worktree, "person.cache"), "mine\n");
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("done/merged");
+    expect(["person.cache", "gate.cache", "merge.cache"].map((name) => existsSync(join(worktree, name)))).toEqual([true, true, true]);
+  });
+
+  test("a file put in its worktree while it waits for approve blocks the merge as dirty and stays (review 3, finding 1)", async () => {
+    writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [test, -f, required.txt]\nmerge_gates:\n  - [test, -f, required.txt]\n");
+    gitIn(repo, "commit", "--quiet", "-am", "merge gates");
+    const main = gitIn(repo, "rev-parse", "main");
+    const worktree = waveWorktree();
+    const pi = session(worktree);
+    await startMergeRequest(pi, { merge: "review" });
+    await pi.until("waiting_approve/passed");
+    writeFileSync(join(worktree, "draft.txt"), "draft\n");
+    await pi.command("approve");
+    await pi.until("blocked/dirty");
+    expect(gitIn(repo, "rev-parse", "main")).toBe(main);
+    expect(gitIn(worktree, "status", "--porcelain")).toBe("?? draft.txt");
   });
 
   test("a Pi that cannot record the request fails the start before anything is recorded; a later start is not refused (m4)", async () => {

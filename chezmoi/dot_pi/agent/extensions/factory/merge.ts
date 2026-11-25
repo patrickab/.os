@@ -13,7 +13,8 @@
  * - Provides `rebaseWorktree`, which a run that opens uses to bring the task branch up to date the same way. It
  *   squashes the task branch onto its base first (`taskBase`): the rebase replays one commit, the task's net change.
  *   A merge request's branch is never committed to nor squashed: the rebase replays its commits and the target gets
- *   every one of them and nothing else
+ *   every one of them and nothing else. Its worktree must hold nothing but HEAD's tree when the merge starts, and
+ *   what its merge gates leave untracked is removed after them
  * - The factory's own commits run no commit hooks and are not signed (`--no-verify --no-gpg-sign`)
  * - Reports the step that cannot be undone (`intent`) right before it, so a resume can tell whether it happened
  * - Provides `mergeTask`: the `MergeResult` and the `factory-gate` data of the commands it ran. It never throws, a
@@ -23,7 +24,19 @@
 import { basename, join } from "node:path";
 import { commitMessageFallback, commitText, type CommitMessage } from "./commitmsg.ts";
 import type { FactoryConfig } from "./config.ts";
-import { addAllArgs, assertCheckoutReady, git, nulList, primaryCheckout, rebaseInProgress, targetMoved, taskBase, trackedChanges } from "./git.ts";
+import {
+  addAllArgs,
+  assertCheckoutReady,
+  git,
+  nulList,
+  primaryCheckout,
+  rebaseInProgress,
+  removeUntracked,
+  targetMoved,
+  taskBase,
+  trackedChanges,
+  uncommittedFiles,
+} from "./git.ts";
 import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import type { CommandResult, Exec } from "./run.ts";
 import { gateData, isMergeRequest, passed, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
@@ -78,8 +91,9 @@ export type GateFailure = { argv: string[]; result: CommandResult };
 /**
  * How a merge ended. `merged`: the main branch is at the task's commit (`merge.ok`). `failed`: nothing was merged, the
  * `factory-merge` data says why. `conflict`: the rebase onto the main branch conflicted on `files` and was aborted.
- * `gate_failed`: a merge gate failed on the rebased branch. `dirty`: a merge request's tracked files differ from HEAD
- * after its merge gates, which then passed on a tree the target would not get. Nothing was merged after any of these.
+ * `gate_failed`: a merge gate failed on the rebased branch. `dirty`: a merge request's worktree held more than HEAD's
+ * tree before its merge, or its tracked files differ from HEAD after its merge gates, which then passed on a tree the
+ * target would not get. Nothing was merged after any of these.
  */
 export type MergeResult =
   | { kind: "merged"; merge: MergeData }
@@ -166,8 +180,12 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
   // A rebase in progress may hold the coder's resolution: it fails the merge here, it is never aborted.
   await assertCheckoutReady(exec, root, task.branch);
 
-  // A merge request merges its source's commits and nothing else: what lies uncommitted stays so.
-  if (!isMergeRequest(task)) {
+  // A merge request merges its source's commits and nothing else: what lies uncommitted stays so. Its run left the
+  // worktree clean, so anything in it now (during `waiting_approve`) is somebody's work, which the merge gates must not
+  // see and their cleanup must not delete.
+  if (isMergeRequest(task)) {
+    if (await uncommittedFiles(exec, root)) return { kind: "dirty" };
+  } else {
     status("commit");
     await commitWorktree(exec, root, text, config.protected);
   }
@@ -192,11 +210,16 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
       // Merge gates that are the round's gates, on the base the round passed them on (the squash keeps the tree), would
       // only repeat that run.
       const onto = await taskBase(exec, root, task);
-      for (const argv of onto === ontoBefore && sameGates ? [] : config.merge_gates) {
-        status(`merge gate ${argv.join(" ")}`);
-        const gate = await exec(argv, { cwd: root });
-        gates.push(gateData(round, "merge_gates", argv, gate));
-        if (!passed(gate)) return { kind: "gate_failed", gate: { argv, result: gate } };
+      try {
+        for (const argv of onto === ontoBefore && sameGates ? [] : config.merge_gates) {
+          status(`merge gate ${argv.join(" ")}`);
+          const gate = await exec(argv, { cwd: root });
+          gates.push(gateData(round, "merge_gates", argv, gate));
+          if (!passed(gate)) return { kind: "gate_failed", gate: { argv, result: gate } };
+        }
+      } finally {
+        // Checked clean above: what lies untracked now is the merge gates' output, which a retry must not see.
+        if (isMergeRequest(task)) await removeUntracked(cleanup, root);
       }
       ontoBefore = onto;
       // The fast-forward moves the target to HEAD: a merge request's working tree must be what was gated.

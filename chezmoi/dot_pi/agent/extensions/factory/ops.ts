@@ -12,7 +12,21 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { commitMessageFallback, isConventionalTitle } from "./commitmsg.ts";
 import { loadTaskFiles, type TaskFiles } from "./config.ts";
 import { initDraft } from "./draft.ts";
-import { abortLeftoverRebase, git, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, taskBase, taskDiff, taskGit, trackedChanges, treeDiff } from "./git.ts";
+import {
+  abortLeftoverRebase,
+  git,
+  LOCKFILES,
+  nulList,
+  primaryCheckout,
+  rebaseInProgress,
+  removeUntracked,
+  taskBase,
+  taskDiff,
+  taskGit,
+  trackedChanges,
+  treeDiff,
+  uncommittedFiles,
+} from "./git.ts";
 import { mergeTask, rebaseWorktree } from "./merge.ts";
 import { runMerge, runMergeRequest, type MergeRequestSteps, type PipelineSteps } from "./pipeline.ts";
 import { runReview } from "./review.ts";
@@ -226,8 +240,8 @@ export function pipelineSteps(deps: OpsDeps, task: Task, taskFilesNow: TaskFiles
 }
 
 /**
- * `pipelineSteps`, the worktree's changes to tracked files and the unsquashed rebase of a merge request. Its diff is
- * HEAD's tree, the one the fast-forward gives the target, not the working tree: untracked files are never reviewed.
+ * `pipelineSteps`, the worktree checks and cleanup and the unsquashed rebase of a merge request. Its diff is HEAD's
+ * tree, the one the fast-forward gives the target, not the working tree.
  */
 function mergeRequestSteps(deps: OpsDeps, task: Task, taskFilesNow: TaskFiles): MergeRequestSteps {
   const { runner } = deps.session;
@@ -235,7 +249,10 @@ function mergeRequestSteps(deps: OpsDeps, task: Task, taskFilesNow: TaskFiles): 
   return {
     ...pipelineSteps(deps, task, taskFilesNow, true),
     diff: async () => treeDiff(runner.run, root, await taskBase(runner.run, root, task), await git(runner.run, root, ["rev-parse", "HEAD^{tree}"]), taskFilesNow.config.lockfiles),
-    dirty: () => trackedChanges(runner.run, root),
+    dirty: () => uncommittedFiles(runner.run, root),
+    trackedChanges: () => trackedChanges(runner.run, root),
+    // Not stopped by a cancel: a cancelled gate's output must not reach the retry.
+    removeUntracked: () => removeUntracked(runner.cleanup, root),
     rebase: () => rebaseWorktree(runner.run, runner.cleanup, deps.cwd, task, taskFilesNow.config.protected),
   };
 }

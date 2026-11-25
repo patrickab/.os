@@ -893,7 +893,8 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
     if (target === undefined) throw new FactoryError("refused", `task ${shortId(record)} has not started yet, so it has no diff`);
     if (!existsSync(record.worktree)) throw new FactoryError("refused", `the worktree of task ${shortId(record)} is gone (${record.worktree})`);
     const base = await git(runCommand, record.worktree, ["merge-base", "HEAD", `refs/heads/${target}`]);
-    const tree = await snapshotTree(runCommand, record.worktree);
+    // A merge request's reviewer saw, and its target gets, the committed tree only.
+    const tree = record.kind === "merge_request" ? await git(runCommand, record.worktree, ["rev-parse", "HEAD^{tree}"]) : await snapshotTree(runCommand, record.worktree);
     const diff = await treeDiff(runCommand, record.worktree, base, tree);
     const files: FileCounts[] = await diffFileCounts(runCommand, record.worktree, base, tree);
     return { base, diff: diff.patch, files };

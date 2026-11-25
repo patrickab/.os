@@ -14,9 +14,10 @@
  * - Provides `runMergeRequest`: the pipeline of a merge request, which has no coder. Its branch is rebased onto the
  *   target (`MergeRequestSteps.rebase`, unsquashed), the gates run, the reviewer reviews the whole diff whatever
  *   `settings.review` says, then it passes into `merging` or the wait for approve. Nothing opens a round: uncommitted
- *   changes to tracked files in its worktree (before the rebase or left by a gate), a rejected review, a conflict
- *   or a failed gate end it `blocked` (`dirty`, `review_rejected`, `conflict`, `gates`), and so does a conflict, a
- *   failed merge gate or a merge gate that left tracked files changed in its `runMerge`
+ *   files in its worktree (tracked or untracked before the rebase, tracked left by a gate), a rejected review, a
+ *   conflict or a failed gate end it `blocked` (`dirty`, `review_rejected`, `conflict`, `gates`), and so does a
+ *   conflict, a failed merge gate or a merge gate that left tracked files changed in its `runMerge`. What the gates
+ *   leave untracked is removed after them (`MergeRequestSteps.removeUntracked`)
  * - A hook or gate that exits `INFRA_EXIT` (75, EX_TEMPFAIL) says the environment is broken, not the change: the task
  *   ends `blocked`, `infra: <last output line>`, without feedback to the coder. A retry starts the next round once it is fixed
  */
@@ -65,8 +66,12 @@ export interface PipelineSteps {
 }
 
 export interface MergeRequestSteps extends PipelineSteps {
-  /** True when tracked files in the worktree differ from HEAD. Untracked files do not count: they are never merged. */
+  /** True when the worktree holds anything but HEAD's tree: changed tracked files or untracked files not ignored. */
   dirty(): Promise<boolean>;
+  /** True when tracked files in the worktree differ from HEAD. */
+  trackedChanges(): Promise<boolean>;
+  /** Deletes the worktree's untracked files that are not ignored. */
+  removeUntracked(): Promise<void>;
   /** Rebases the branch onto the target without squashing it: the conflicting files, null when it went clean. */
   rebase(): Promise<string[] | null>;
 }
@@ -164,21 +169,28 @@ export async function runMergeRequest(snapshot: Snapshot, steps: MergeRequestSte
   const end = (state: State, reason: string): Draft[] => [...drafts, stateDraft(state, round, reason)];
   try {
     const config = steps.config();
-    // Only the source's commits are gated, reviewed and merged: what lies uncommitted is never committed for them.
+    // The gates and the review see the committed tree only. The factory made the worktree pristine, so anything else in
+    // it is somebody's work: it blocks the run and is left as it is.
     if (await steps.dirty()) return end("blocked", "dirty");
     steps.status(`round ${round}: rebase onto ${task.mainBranch}`);
     const conflicts = await steps.rebase();
     if (steps.cancelled()) return end("cancelled", "cancelled");
     if (conflicts) return end("blocked", "conflict");
-    for (const argv of config.gates) {
-      steps.status(`round ${round}: gates ${argv.join(" ")}`);
-      const result = await steps.runCommand(argv);
-      drafts.push(customDraft("factory-gate", gateData(round, "gates", argv, result)));
-      if (steps.cancelled()) return end("cancelled", "cancelled");
-      if (!passed(result)) return end("blocked", "gates");
+    try {
+      for (const argv of config.gates) {
+        steps.status(`round ${round}: gates ${argv.join(" ")}`);
+        const result = await steps.runCommand(argv);
+        drafts.push(customDraft("factory-gate", gateData(round, "gates", argv, result)));
+        if (steps.cancelled()) return end("cancelled", "cancelled");
+        if (!passed(result)) return end("blocked", "gates");
+      }
+    } finally {
+      // The worktree was clean before the gates: what lies untracked now is their output, which neither the review,
+      // the next gate nor a retry may see.
+      await steps.removeUntracked();
     }
     // A gate that rewrote a tracked file passed on a tree the target would never get.
-    if (await steps.dirty()) return end("blocked", "dirty");
+    if (await steps.trackedChanges()) return end("blocked", "dirty");
 
     steps.status(`round ${round}: diff`);
     const diff = await steps.diff();

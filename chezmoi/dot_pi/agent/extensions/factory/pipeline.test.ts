@@ -332,6 +332,10 @@ describe("runMergeRequest", () => {
     const base = fakeSteps(overrides);
     return Object.assign(base, {
       dirty: async () => dirty,
+      trackedChanges: async () => false,
+      removeUntracked: async () => {
+        base.calls.push("removeUntracked");
+      },
       rebase: async () => {
         base.calls.push("rebase");
         return conflicts;
@@ -343,7 +347,7 @@ describe("runMergeRequest", () => {
   test("rebase, gates (no after_code hooks), review even with review off, then merging; review merge mode waits for approve", async () => {
     const auto = steps();
     expect(states(await runMergeRequest(mergeRequestOf({ review: false }), auto))).toEqual(["merging/passed"]);
-    expect(auto.calls).toEqual(["rebase", "lint", "test", "review"]);
+    expect(auto.calls).toEqual(["rebase", "lint", "test", "removeUntracked", "review"]);
     expect(states(await runMergeRequest(mergeRequestOf({ merge: "review" }), steps()))).toEqual(["waiting_approve/passed"]);
   });
 
@@ -365,10 +369,18 @@ describe("runMergeRequest", () => {
   });
 
   test("a gate that leaves tracked files changed blocks it as dirty before the review (review 2, finding 1)", async () => {
-    const checks = [false, true];
-    const rewritten = Object.assign(steps(), { dirty: async () => checks.shift() ?? true });
+    const rewritten = Object.assign(steps(), { trackedChanges: async () => true });
     expect(states(await runMergeRequest(mergeRequestOf(), rewritten))).toEqual(["blocked/dirty"]);
-    expect(rewritten.calls).toEqual(["rebase", "lint", "test"]);
+    expect(rewritten.calls).toEqual(["rebase", "lint", "test", "removeUntracked"]);
+  });
+
+  test("what the gates leave untracked is removed after them, failed or cancelled too (review 3, finding 1)", async () => {
+    const failing = steps({ runCommand: async () => commandResult(1, "boom") });
+    expect(states(await runMergeRequest(mergeRequestOf(), failing))).toEqual(["blocked/gates"]);
+    expect(failing.calls).toEqual(["rebase", "removeUntracked"]);
+    const cancelled = steps({ cancelled: () => cancelled.calls.includes("lint") });
+    expect(states(await runMergeRequest(mergeRequestOf(), cancelled))).toEqual(["cancelled/cancelled"]);
+    expect(cancelled.calls).toEqual(["rebase", "lint", "removeUntracked"]);
   });
 
   test("its merge blocks on a conflict or a failed merge gate instead of a coder round", async () => {

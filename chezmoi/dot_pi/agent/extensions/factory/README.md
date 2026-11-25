@@ -121,11 +121,14 @@ problems go back to the coder. A passed round merges into the target branch, or 
   every one of them by fast-forward), the `gates` run (not `after_code`), the reviewer reviews the whole diff against
   the target whatever `review` says, with `request` verbatim in its prompt under its own heading as its instructions.
   Approved: the normal merge queue (`merge_gates`, fast-forward), with `merge: review` after `waiting_approve`
-- Nothing is ever committed for it: the gates, the review and the merge all see the source's committed tree.
-  Uncommitted changes to tracked files end it `blocked` `dirty`: found before the rebase (clean them up or commit
-  them to the source, then retry), or left by a gate or a merge gate (which then passed on a tree the target would
-  not get; the gate must not rewrite tracked files, or the source must already hold what it writes). Untracked files
-  never count, are not reviewed and are not merged: what a gate leaves behind does not block a retry
+- Nothing is ever committed for it: whenever its gates or review run, its worktree holds nothing but the source's
+  committed tree, the one the target gets. Before a run (start and retry) and before its merge, a changed tracked file
+  or an untracked file that is not ignored ends it `blocked` `dirty` and is left as it is: the factory made the
+  worktree clean, so it is somebody's work (commit it to the source or remove it, then retry). After the gates and
+  after the merge gates, passed or failed, a changed tracked file ends it `blocked` `dirty` too (the gate must not
+  rewrite tracked files, or the source must already hold what it writes), and the untracked files they left are
+  deleted (`git clean -fd`), so neither the review, the next gate nor a retry sees them. Ignored files never count
+  and are never deleted. `tasks.diff` shows the committed tree against the target, the diff its reviewer saw
 - Nothing opens a round: a rejected review ends `blocked` `review_rejected`, a rebase conflict `blocked` `conflict`,
   failed gates or merge gates `blocked` `gates`; findings and gate output stay in the timeline. `tasks.retry` runs it
   again from the rebase. `tasks.message` is refused and not among its actions, and `factory_ask_supervisor` is not
@@ -138,7 +141,8 @@ problems go back to the coder. A passed round merges into the target branch, or 
   target first
 - `factory.yaml` and the reviewer prompt come from the target branch's tip when a run starts (the start and every
   retry), and read again when its merge starts (auto or approve), never from the source: a retry is held to the gates
-  the target has gained meanwhile, and the merge to the merge gates of the tip it rebases onto. The `factory-task` entry
+  the target has gained meanwhile, and the merge to the merge gates of the tip when its merge starts (a target that
+  moves during the merge does not change them). The `factory-task` entry
   (timeline kind `task`) carries `kind` and `source` (null for a `task`)
 
 ## Commit message
