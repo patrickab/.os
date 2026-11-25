@@ -289,6 +289,16 @@ Long tool output degrades later reasoning and hides the current state from the u
 - A filter must not swallow what matters by mistake: errors and unexpected output still have to come through.
 - Before a long-running task, check with a short run that it produces the expected output, so it does not fail late.
 
+### Web tools
+
+Pick the cheapest tool that answers the question; keep full pages out of context.
+
+- **Search**: `web_search` (pi-web-access, enable with `web_enable`). It routes through free or subscription providers first.
+- **Site-restricted or research search** (`includeDomains`, `category: "publication"`, `searchType: "deep-lite"`): `agent_browser_web_search`. It uses paid Exa credit, so only when those filters matter.
+- **A given URL** (pasted links, docs, articles, PDFs, arXiv, YouTube, GitHub repos): `fetch_content`. Prefer `mode: "answer"` or `"extract"` over full-page reads.
+- **Checking a claim**: `source_check`.
+- **Pages that need login, interaction or JavaScript, or that block `fetch_content`**: `agent_browser`.
+
 ## 6. Documentation and repository context
 
 ### Writing standard
