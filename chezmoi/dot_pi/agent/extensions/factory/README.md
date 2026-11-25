@@ -60,17 +60,20 @@ problems go back to the coder. A passed round merges into the target branch, or 
 - A `repo` param is a path inside the repository, relative to the caller's `cwd`, which is also its default; without
   `cwd` it must be absolute. `id` accepts a unique prefix. Each action that checks a task's state and acts on it holds a
   per-task lock from the check on (a runner keeps it until it exits)
-- `tasks.start` (`title`, `request`, `overrides`, `tag`, `plan`, `kind`): `tag` is path segments of
+- `tasks.start` (`title`, `request`, `overrides`, `tag`, `plan`, `kind`, `source`): `tag` is path segments of
   `[A-Za-z0-9._@+-]` joined by `/` (default the system user name), `plan` a memory_store path the factory only stores,
-  `kind` only `task` so far. It creates the worktree, runs `after_create`, spawns the runner and
-  returns. An abort before the runner is spawned kills the hook and removes the worktree and branch
+  `kind` `task` (default) or `merge_request` (below; `source` is for it only). It creates the worktree, runs
+  `after_create`, spawns the runner and returns. An abort before the runner is spawned kills the hook and removes the
+  worktree and branch
 - `tasks.approve` (from `waiting_approve`), `tasks.retry` (from `blocked`, `cancelled` or interrupted), `tasks.cancel`
   (stops a live runner first), `tasks.message` (a live runner gets it as a follow-up through the task's inbox, a
-  resting or interrupted task a new runner; to a task in `waiting_answer` it is the answer; refused while merging). A line that reaches the inbox after the runner
+  resting or interrupted task a new runner; to a task in `waiting_answer` it is the answer; refused while merging and
+  for a merge request). A line that reaches the inbox after the runner
   closed Pi goes to a successor runner. Cancel or retry of an interrupted task fails when its runner ends before it ran
 - `tasks.remove`: deletes the record, log, worktree and the task's own branch (through git) of a task that is not
   running (an interrupted task counts as not running) and not in `waiting_answer`. It refuses a task with commits its target branch lacks or
-  uncommitted changes; with `force: true` it removes it anyway and names what it dropped
+  uncommitted changes; with `force: true` it removes it anyway and names what it dropped. A merge request's source
+  branch is never deleted, so its commits count as nothing dropped
 - `overrides` and stored settings: `merge` (`auto` | `review`), `maxRounds` (1..20), `review` (bool), `branch`,
   `models.coder`, `models.reviewer` (`provider/model`)
 - The `factory` tool for agents: `{action, ...}` with `action` an `ACTIONS` name that is not `hostOnly` and that
@@ -91,7 +94,7 @@ problems go back to the coder. A passed round merges into the target branch, or 
 ## Commands (inside a task's own Pi session)
 
 - `/factory init`: write a draft `factory.yaml` into the main checkout (any session), uncommitted
-- `/factory start <json>`: `{"request", "title", "settings"}`; what the tool's runner and gigachad-bot send
+- `/factory start <json>`: `{"request", "title", "settings", "kind"?}`; what the tool's runner and gigachad-bot send
 - `/factory approve`, `/factory retry`, `/factory cancel`
 - A plain message to a resting task starts a new run; to a task in `waiting_answer` it is the answer (below)
 
@@ -104,6 +107,23 @@ problems go back to the coder. A passed round merges into the target branch, or 
   round budget and no squash or rebase of the worktree (the state goes back to `running`, reason `answer`). The
   round's steps run when that turn ends, as for any turn. In `waiting_answer` the actions are `tasks.message` and
   `tasks.cancel`; `tasks.wait` counts the task as needing attention
+
+## Merge requests
+
+- `tasks.start {kind: "merge_request", source, overrides: {branch: <target>}, title, request}` reviews and merges an
+  existing branch, the gate between a wave's branch and the branch all waves flow into. `source` must be a local
+  branch other than the target, checked out in no worktree; the task's worktree checks it out (`TaskView.branch` is
+  `source`). A failed start or `tasks.remove` never deletes it
+- No coder turn ever: the branch is rebased onto the target without squashing (its commits survive, the target gets
+  every one of them by fast-forward), the `gates` run (not `after_code`), the reviewer reviews the whole diff against
+  the target whatever `review` says, with `request` verbatim in its prompt under its own heading as its instructions.
+  Approved: the normal merge queue (`merge_gates`, fast-forward), with `merge: review` after `waiting_approve`
+- Nothing opens a round: a rejected review ends `blocked` `review_rejected`, a rebase conflict `blocked` `conflict`,
+  failed gates or merge gates `blocked` `gates`; findings and gate output stay in the timeline. `tasks.retry` runs it
+  again from the rebase (a rebase a dead run left in progress is aborted first). `tasks.message` is refused and not
+  among its actions, and `factory_ask_supervisor` is not registered in its session
+- `factory.yaml` and the reviewer prompt come from the target branch, never from the source. The `factory-task` entry
+  (timeline kind `task`) carries `kind` and `source` (null for a `task`)
 
 ## Commit message
 

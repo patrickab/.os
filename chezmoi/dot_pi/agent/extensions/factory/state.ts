@@ -8,6 +8,7 @@
  */
 import type { CommitMessage } from "./commitmsg.ts";
 import type { CommandResult } from "./run.ts";
+import type { TaskKind } from "./tasks.ts";
 import { isRecord } from "./util.ts";
 
 /** `waiting_answer`: the coder asked the supervisor (`factory-question`); the next message answers it. */
@@ -29,9 +30,12 @@ export interface Settings {
 }
 
 export interface StartPayload {
+  /** For a `merge_request`: the reviewer's extra instructions. */
   request: string;
   title: string;
   settings: Settings;
+  /** Absent: `task`. A `merge_request` reviews and merges the branch its worktree has checked out, no coder turn ever. */
+  kind?: TaskKind;
 }
 
 export interface Task extends StartPayload {
@@ -43,6 +47,14 @@ export interface Task extends StartPayload {
   baseSha: string;
   /** `PROTOCOL_VERSION` of the plugin that started the task. Absent on tasks started before it was written. */
   protocol?: number;
+  /** Absent on tasks started before merge requests existed: `task`. */
+  kind?: TaskKind;
+  /** The branch a `merge_request` reviews and merges (its `branch`), null for a `task`. Absent on older tasks. */
+  source?: string | null;
+}
+
+export function isMergeRequest(task: Pick<Task, "kind">): boolean {
+  return task.kind === "merge_request";
 }
 
 /** The version of the entry protocol, written into every new `factory-task` entry. */
@@ -413,7 +425,8 @@ export function parseStartPayload(text: string): StartPayload {
     throw new Error("payload is not JSON");
   }
   if (!isRecord(raw)) throw new Error("payload is not an object");
-  const { request, title, settings } = raw;
+  const { request, title, settings, kind } = raw;
+  if (kind !== undefined && kind !== "task" && kind !== "merge_request") throw new Error('kind must be "task" or "merge_request"');
   if (typeof request !== "string" || request.trim() === "") throw new Error("request must be a non-empty string");
   if (typeof title !== "string" || title.trim() === "") throw new Error("title must be a non-empty string");
   if (!isRecord(settings)) throw new Error("settings must be an object");
@@ -424,5 +437,5 @@ export function parseStartPayload(text: string): StartPayload {
   if (maxRounds === undefined) throw new Error(`settings.maxRounds must be an integer from 1 to ${MAX_ROUNDS_LIMIT}`);
   if (review === undefined) throw new Error("settings.review must be a boolean");
   if (models === undefined) throw new Error("settings.models must be an object");
-  return { request, title, settings: { branch, merge, maxRounds, review, models } };
+  return { request, title, settings: { branch, merge, maxRounds, review, models }, ...(kind === "merge_request" ? { kind } : {}) };
 }

@@ -68,6 +68,8 @@ function addTaskWorktree(): string {
 function fake(cwd: string) {
   const entries: { customType: string; data: any }[] = [];
   const userMessages: string[] = [];
+  /** `recordRequest` calls: a merge request's request, recorded without a turn. */
+  const requests: string[] = [];
   const coderMessages: { message: CoderMessage; triggerTurn: boolean }[] = [];
   const flags = { idle: true, aborts: 0, modelAvailable: true };
   const deps: OpsDeps = {
@@ -75,6 +77,7 @@ function fake(cwd: string) {
     cwd,
     appendEntry: (customType, data) => entries.push({ customType, data }),
     sendUserMessage: (text) => userMessages.push(text),
+    recordRequest: (text) => requests.push(text),
     sendMessage: (message, { triggerTurn }) => coderMessages.push({ message, triggerTurn }),
     setStatus: () => undefined,
     isIdle: () => flags.idle,
@@ -94,7 +97,7 @@ function fake(cwd: string) {
     record(deps, "factory-task", task);
     record(deps, "factory-state", { state, round: 1, reason: "test" });
   };
-  return { deps, entries, userMessages, coderMessages, flags, states, holdTask };
+  return { deps, entries, userMessages, requests, coderMessages, flags, states, holdTask };
 }
 
 describe("pipelineSteps.askCommitMessage", () => {

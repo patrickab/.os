@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_PROTECTED, type FactoryConfig } from "./config.ts";
-import { runMerge, runRound, type PipelineSteps } from "./pipeline.ts";
+import { runMerge, runMergeRequest, runRound, type PipelineSteps } from "./pipeline.ts";
 import type { CommandResult } from "./run.ts";
 import { stateDraft, type Draft, type MergeData, type ReviewData, type ReviewStatus, type Settings, type Snapshot } from "./state.ts";
 
@@ -320,5 +320,48 @@ describe("runMerge", () => {
   test("a merge that fails under a cancel ends cancelled", async () => {
     const entries = await runMerge(snapshotOf(), config, fakeSteps({ cancelled: () => true, merge: async () => ({ gates: [], result: { kind: "failed", merge: failed } }) }));
     expect(lastState(entries)).toEqual({ state: "cancelled", round: 1, reason: "cancelled" });
+  });
+});
+
+describe("runMergeRequest", () => {
+  const mergeRequestOf = (settings: Partial<Settings> = {}): Snapshot => {
+    const snapshot = snapshotOf(settings);
+    return { ...snapshot, task: { ...snapshot.task, branch: "wave", kind: "merge_request", source: "wave" } };
+  };
+  const steps = (overrides: Partial<PipelineSteps> = {}, conflicts: string[] | null = null) => {
+    const base = fakeSteps(overrides);
+    return Object.assign(base, {
+      rebase: async () => {
+        base.calls.push("rebase");
+        return conflicts;
+      },
+    });
+  };
+  const states = (entries: Draft[]) => entries.flatMap((entry) => (entry.type === "custom" && entry.customType === "factory-state" ? [`${entry.data.state}/${entry.data.reason}`] : []));
+
+  test("rebase, gates (no after_code hooks), review even with review off, then merging; review merge mode waits for approve", async () => {
+    const auto = steps();
+    expect(states(await runMergeRequest(mergeRequestOf({ review: false }), auto))).toEqual(["merging/passed"]);
+    expect(auto.calls).toEqual(["rebase", "lint", "test", "review"]);
+    expect(states(await runMergeRequest(mergeRequestOf({ merge: "review" }), steps()))).toEqual(["waiting_approve/passed"]);
+  });
+
+  test("a conflict, a failed gate (infra too) or a rejected review block it, and never open a round", async () => {
+    const conflict = await runMergeRequest(mergeRequestOf(), steps({}, ["a.ts"]));
+    const failing = (code: number) => steps({ runCommand: async () => commandResult(code, "boom") });
+    const gates = await runMergeRequest(mergeRequestOf(), failing(1));
+    const infra = await runMergeRequest(mergeRequestOf(), failing(75));
+    const rejected = await runMergeRequest(mergeRequestOf(), steps({ review: async () => reviewOf("ok", ["major"]) }));
+    expect([conflict, gates, infra, rejected].map(states)).toEqual([["blocked/conflict"], ["blocked/gates"], ["blocked/gates"], ["blocked/review_rejected"]]);
+    expect([conflict, gates, infra, rejected].flatMap(kinds).filter((kind) => kind === "factory-round" || kind === "custom_message")).toEqual([]);
+    expect(kinds(rejected)).toEqual(["factory-gate", "factory-gate", "factory-review", "factory-state"]);
+  });
+
+  test("its merge blocks on a conflict or a failed merge gate instead of a coder round", async () => {
+    const conflict = await runMerge(mergeRequestOf(), config, fakeSteps({ merge: async () => ({ gates: [], result: { kind: "conflict", files: ["a.ts"] } }) }));
+    const gate = { argv: ["test"], result: commandResult(1, "fail") };
+    const gateFailed = await runMerge(mergeRequestOf(), config, fakeSteps({ merge: async () => ({ gates: [], result: { kind: "gate_failed", gate } }) }));
+    expect([conflict, gateFailed].map(states)).toEqual([["blocked/conflict"], ["blocked/gates"]]);
+    expect([...conflict, ...gateFailed].map((entry) => entry.type)).toEqual(["custom", "custom"]);
   });
 });

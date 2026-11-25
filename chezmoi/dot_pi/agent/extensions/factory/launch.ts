@@ -7,6 +7,9 @@
  *   (`agent-worktree` when it is on PATH, else `git worktree add`), runs the repo's `hooks.after_create` in it, writes
  *   the `TaskRecord` and starts the detached runner with `/factory start <json>`. A failing or aborted step undoes the
  *   earlier ones, through git only. A missing target branch or `factory.yaml` throws a `LaunchRefusedError`
+ * - A `merge_request` gets a worktree on its existing `source` branch instead (`git worktree add`): a source that is
+ *   missing, the target itself or checked out in a worktree is a `LaunchRefusedError`. Its source branch is never
+ *   deleted, not by a failed start and not by `deleteTask`
  * - Provides `sendCommand`: one more message to a task's session, through a new detached runner (the caller's `env`;
  *   `runnerSpawn` puts it in a systemd user scope under a service) that takes over the task lock its caller holds;
  *   `messageTask`: a message to the coder in any state but merging (`taskInboxPath` of a live runner, else a new
@@ -25,7 +28,7 @@ import { inboxReadPath, lastFactoryState, taskMainBranch } from "./runner.ts";
 import { CommandRunner, runCommand, type Exec } from "./run.ts";
 import { factoryHome, loadSettings, resolveSettings, type StoredSettings } from "./settings.ts";
 import type { Settings, StartPayload } from "./state.ts";
-import { handTaskLock, lockTask, removeTask, systemUser, TaskBusyError, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskRecord } from "./tasks.ts";
+import { handTaskLock, lockTask, removeTask, systemUser, TaskBusyError, taskLockPath, taskLogPath, tasksDir, unlockTask, writeTask, type TaskKind, type TaskRecord } from "./tasks.ts";
 import { outputTail } from "./util.ts";
 
 // `import.meta.dirname`, not Bun's `import.meta.dir`: inside Pi the latter is not this directory, and a runner would not start.
@@ -56,8 +59,8 @@ export async function defaultBranch(repo: string): Promise<string> {
 }
 
 /** The prompt that starts a task in its session. */
-export function startCommand(title: string, request: string, settings: Settings): string {
-  const payload: StartPayload = { request, title, settings };
+export function startCommand(title: string, request: string, settings: Settings, kind: TaskKind = "task"): string {
+  const payload: StartPayload = { request, title, settings, ...(kind === "merge_request" ? { kind } : {}) };
   return `/factory start ${JSON.stringify(payload)}`;
 }
 
@@ -84,11 +87,20 @@ async function worktreeOfBranch(repo: string, branch: string): Promise<string | 
   return undefined;
 }
 
-/** Best effort, through git only: removes the worktree at `path` and deletes `branch`, the task's own branch. */
-async function removeWorktree(repo: string, path: string | undefined, branch: string): Promise<void> {
+/** Best effort, through git only: removes the worktree at `path` and deletes `branch`, the task's own branch, when given. */
+async function removeWorktree(repo: string, path: string | undefined, branch: string | undefined): Promise<void> {
   if (path !== undefined && existsSync(path)) await runCommand(["git", "worktree", "remove", "--force", path], { cwd: repo });
   await runCommand(["git", "worktree", "prune"], { cwd: repo });
-  if (await localBranchExists(repo, branch)) await runCommand(["git", "branch", "-D", branch], { cwd: repo });
+  if (branch !== undefined && (await localBranchExists(repo, branch))) await runCommand(["git", "branch", "-D", branch], { cwd: repo });
+}
+
+/** The branch a task owns and removing it deletes: a merge request's source branch is not its own. */
+function ownBranch(record: Pick<TaskRecord, "branch" | "kind">): string | undefined {
+  return record.kind === "merge_request" ? undefined : record.branch;
+}
+
+function worktreePath(repo: string, name: string): string {
+  return resolve(repo, "..", "worktrees", basename(repo), name);
 }
 
 /** The new worktree's path. A failure removes what the attempt left (a worktree on `name`, the branch `name`). */
@@ -102,13 +114,36 @@ async function createWorktree(exec: Exec, repo: string, name: string, base: stri
       if (path === "") throw new Error(`agent-worktree create ${name}: printed no path`);
       return path;
     }
-    const path = resolve(repo, "..", "worktrees", basename(repo), name);
+    const path = worktreePath(repo, name);
     await git(exec, repo, ["worktree", "add", "-b", name, path, base]);
     return path;
   } catch (error) {
     await removeWorktree(repo, await worktreeOfBranch(repo, name), name).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * A worktree named `name` on the existing branch `source`, through git: `agent-worktree` only makes new branches. A
+ * failure removes the worktree the attempt left, never `source`.
+ */
+async function checkoutWorktree(exec: Exec, repo: string, name: string, source: string): Promise<string> {
+  const path = worktreePath(repo, name);
+  try {
+    await git(exec, repo, ["worktree", "add", "--quiet", path, source]);
+    return path;
+  } catch (error) {
+    await removeWorktree(repo, path, undefined).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Refuses a merge request's `source` unless it is a local branch other than `target`, checked out in no worktree. */
+async function requireSourceBranch(repo: string, source: string, target: string): Promise<void> {
+  if (!(await localBranchExists(repo, source))) throw new LaunchRefusedError(`${repo}: the source branch ${source} does not exist locally`);
+  if (source === target) throw new LaunchRefusedError(`${repo}: the source branch ${source} is the target branch itself`);
+  const holder = await worktreeOfBranch(repo, source);
+  if (holder !== undefined) throw new LaunchRefusedError(`${repo}: the source branch ${source} is checked out in ${holder}, remove that worktree or switch it to another branch first`);
 }
 
 async function runAfterCreate(exec: Exec, worktree: string): Promise<void> {
@@ -139,6 +174,10 @@ export interface LaunchInput {
   /** Default: `systemUser()`. */
   tag?: string;
   plan?: string | null;
+  /** Default: `task`. */
+  kind?: TaskKind;
+  /** The existing branch a `merge_request` reviews and merges; required for that kind, ignored for `task`. */
+  source?: string;
   /** Aborting it before the runner is started kills the running hook and undoes the launch. */
   signal?: AbortSignal;
   /** The runner's environment. */
@@ -166,6 +205,12 @@ export async function launchTask(input: LaunchInput): Promise<TaskRecord> {
   if (config.exitCode !== 0) {
     throw new LaunchRefusedError(`${repo}: branch ${settings.branch} has no factory.yaml (write one with /factory init or the config.write action, and commit it)`);
   }
+  const kind = input.kind ?? "task";
+  const source = kind === "merge_request" ? input.source : undefined;
+  if (kind === "merge_request") {
+    if (source === undefined) throw new Error("a merge request needs a source branch");
+    await requireSourceBranch(repo, source, settings.branch);
+  }
 
   const id = crypto.randomUUID();
   const name = `${slug(input.title)}-${id.slice(0, 8)}`;
@@ -175,7 +220,8 @@ export async function launchTask(input: LaunchInput): Promise<TaskRecord> {
   input.signal?.addEventListener("abort", abort, { once: true });
   try {
     if (aborted()) throw new Error("the start was aborted");
-    const worktree = await createWorktree(commands.run, repo, name, settings.branch).catch((error: unknown) => {
+    const made = source === undefined ? createWorktree(commands.run, repo, name, settings.branch) : checkoutWorktree(commands.run, repo, name, source);
+    const worktree = await made.catch((error: unknown) => {
       throw aborted() ? new Error("the start was aborted") : error;
     });
     let recorded = false;
@@ -186,23 +232,23 @@ export async function launchTask(input: LaunchInput): Promise<TaskRecord> {
         id,
         repo,
         worktree,
-        branch: name,
+        branch: source ?? name,
         title: input.title,
         sessionId: crypto.randomUUID(),
         sessionDir: join(factoryHome(), "sessions", repoDirName(repo)),
         createdAt: new Date().toISOString(),
         tag: input.tag ?? systemUser(),
         plan: input.plan ?? null,
-        kind: "task",
+        kind,
       };
       await writeTask(record);
       recorded = true;
       await lockTask(id);
-      await sendCommand(record, startCommand(input.title, input.request, settings), input.env);
+      await sendCommand(record, startCommand(input.title, input.request, settings, kind), input.env);
       return record;
     } catch (error) {
       if (recorded) await removeTask(id).catch(() => undefined);
-      await removeWorktree(repo, worktree, name).catch(() => undefined);
+      await removeWorktree(repo, worktree, source === undefined ? name : undefined).catch(() => undefined);
       throw aborted() ? new Error("the start was aborted") : error;
     }
   } finally {
@@ -360,11 +406,12 @@ export interface UnmergedWork {
 
 /**
  * The task's unmerged work. Without a `target` (the task never recorded one) its commits are those no other local
- * branch has. A worktree whose status cannot be read counts as dirty.
+ * branch has. A worktree whose status cannot be read counts as dirty. A merge request's commits stay on its source
+ * branch, which removing it keeps: none count.
  */
 export async function unmergedWork(record: TaskRecord, target: string | undefined): Promise<UnmergedWork> {
   let commits = 0;
-  if (await localBranchExists(record.repo, record.branch)) {
+  if (ownBranch(record) !== undefined && (await localBranchExists(record.repo, record.branch))) {
     const range =
       target !== undefined && (await localBranchExists(record.repo, target))
         ? [`refs/heads/${target}..refs/heads/${record.branch}`]
@@ -380,11 +427,15 @@ export async function unmergedWork(record: TaskRecord, target: string | undefine
   return { commits, dirty };
 }
 
-/** Removes the task's worktree, its own branch (through git), its record, its runner log, its lock and its inbox. The session file stays. */
+/**
+ * Removes the task's worktree, its own branch (through git; a merge request's source branch stays), its record, its
+ * runner log, its lock and its inbox. The session file stays.
+ */
 export async function deleteTask(record: TaskRecord): Promise<void> {
-  await removeWorktree(record.repo, record.worktree, record.branch);
+  const branch = ownBranch(record);
+  await removeWorktree(record.repo, record.worktree, branch);
   if (existsSync(record.worktree)) throw new Error(`${record.worktree}: the worktree could not be removed`);
-  if (await localBranchExists(record.repo, record.branch)) throw new Error(`${record.repo}: the branch ${record.branch} could not be deleted`);
+  if (branch !== undefined && (await localBranchExists(record.repo, branch))) throw new Error(`${record.repo}: the branch ${branch} could not be deleted`);
   await removeTask(record.id);
   await rm(taskInboxPath(record.id), { force: true });
   await rm(inboxReadPath(taskInboxPath(record.id)), { force: true });

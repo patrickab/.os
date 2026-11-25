@@ -11,6 +11,11 @@
  * - A passed round whose task title is not a conventional commit title first asks the coder for the commit message
  *   (`askCommitMessage`, a `factory-commit-ask` message in the same run); `commitAnswerDrafts` turns the answer into
  *   the `factory-commit-message` entry and the state the round passed into
+ * - Provides `runMergeRequest`: the pipeline of a merge request, which has no coder. Its branch is rebased onto the
+ *   target (`MergeRequestSteps.rebase`, unsquashed), the gates run, the reviewer reviews the whole diff whatever
+ *   `settings.review` says, then it passes into `merging` or the wait for approve. Nothing opens a round: a rejected
+ *   review, a conflict or a failed gate ends it `blocked` (`review_rejected`, `conflict`, `gates`), and so does a
+ *   conflict or a failed merge gate in its `runMerge`
  * - A hook or gate that exits `INFRA_EXIT` (75, EX_TEMPFAIL) says the environment is broken, not the change: the task
  *   ends `blocked`, `infra: <last output line>`, without feedback to the coder. A retry starts the next round once it is fixed
  */
@@ -32,6 +37,7 @@ import {
   stateDraft,
   COMMIT_ASK_TYPE,
   type CommitAskDraft,
+  isMergeRequest,
   type Draft,
   type ReviewData,
   type Snapshot,
@@ -55,6 +61,11 @@ export interface PipelineSteps {
   openRebase(): Promise<string[] | null>;
   /** True when a passed round asks the coder for the commit message before it ends. Absent: never. */
   askCommitMessage?(): boolean;
+}
+
+export interface MergeRequestSteps extends PipelineSteps {
+  /** Rebases the branch onto the target without squashing it: the conflicting files, null when it went clean. */
+  rebase(): Promise<string[] | null>;
 }
 
 export interface RoundResult {
@@ -113,6 +124,8 @@ export async function runMerge(snapshot: Snapshot, config: FactoryConfig, steps:
   const drafts: Draft[] = gates.map((gate) => customDraft("factory-gate", gate));
   // Nothing was merged: the coder resolves the conflict or the failed gate in a round of its own, unless cancelled.
   const problem = (trigger: Trigger, text: string): Draft[] => {
+    // No coder could resolve it: the findings stay in the gate entries, the task waits for a retry.
+    if (isMergeRequest(snapshot.task)) return [...drafts, stateDraft("blocked", round, trigger)];
     const next = nextRound(snapshot, trigger, text);
     const state = next.continue ? stateDraft("running", round + 1, trigger) : stateDraft("blocked", round, `max_rounds: ${trigger}`);
     return [...drafts, ...next.entries, state];
@@ -136,6 +149,40 @@ export async function runMerge(snapshot: Snapshot, config: FactoryConfig, steps:
       drafts.push(customDraft("factory-merge", result.merge));
       drafts.push(steps.cancelled() ? stateDraft("cancelled", round, "cancelled") : stateDraft("blocked", round, "merge_failed"));
       return drafts;
+  }
+}
+
+/** A merge request's pipeline, from the rebase onto its target to `merging`, the wait for approve or `blocked`. */
+export async function runMergeRequest(snapshot: Snapshot, steps: MergeRequestSteps): Promise<Draft[]> {
+  const { round, task } = snapshot;
+  const drafts: Draft[] = [];
+  const end = (state: State, reason: string): Draft[] => [...drafts, stateDraft(state, round, reason)];
+  try {
+    const config = steps.config();
+    steps.status(`round ${round}: rebase onto ${task.mainBranch}`);
+    const conflicts = await steps.rebase();
+    if (steps.cancelled()) return end("cancelled", "cancelled");
+    if (conflicts) return end("blocked", "conflict");
+    for (const argv of config.gates) {
+      steps.status(`round ${round}: gates ${argv.join(" ")}`);
+      const result = await steps.runCommand(argv);
+      drafts.push(customDraft("factory-gate", gateData(round, "gates", argv, result)));
+      if (steps.cancelled()) return end("cancelled", "cancelled");
+      if (!passed(result)) return end("blocked", "gates");
+    }
+
+    steps.status(`round ${round}: diff`);
+    const diff = await steps.diff();
+    if (diff.paths.length === 0) return end("done", "no_changes");
+    steps.status(`round ${round}: review`);
+    const review = await steps.review(round, diff);
+    drafts.push(customDraft("factory-review", review));
+    if (steps.cancelled() || review.status === "aborted") return end("cancelled", "cancelled");
+    if (review.status === "ok" && !review.approved) return end("blocked", "review_rejected");
+    if (review.status !== "ok" && review.status !== "no_diff") return end("blocked", `review_${review.status}`);
+    return end(task.settings.merge === "review" ? "waiting_approve" : "merging", "passed");
+  } catch (error) {
+    return steps.cancelled() ? end("cancelled", "cancelled") : end("blocked", `pipeline_error: ${errorText(error)}`);
   }
 }
 

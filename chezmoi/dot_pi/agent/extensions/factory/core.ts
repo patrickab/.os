@@ -11,6 +11,8 @@
  * - The models a task or repository may use are one user-level list (`models.ts`): `models.get`/`models.set`.
  *   `tasks.start` and `settings.set` refuse a model not on it, and anything while it is empty; reads never check it
  * - `hostOnly` actions are for the host (pi-host), never offered to an agent: `tasks.import`
+ * - A `merge_request` task (`tasks.start` with `kind` and `source`) reviews and merges an existing branch, no coder
+ *   ever: `tasks.message` refuses it, and it never offers that action
  * - `tasks.wait` polls the watched tasks until they rest (no runner lives and the state is a resting one, or the task
  *   is interrupted) or one needs attention (it rests and is not `done`): a supervisor's completion signal
  * - Runners an action starts get the caller's `env` (default `process.env`): the host passes one without its secrets
@@ -208,15 +210,16 @@ export const ACTIONS = {
   ),
   "tasks.diff": spec("A task's worktree against where it branched off its target", { id: ID }, ["id"], false),
   "tasks.start": spec(
-    "Start a task in its own worktree; answers once its runner is spawned",
+    "Start a task in its own worktree; answers once its runner is spawned. kind merge_request: no coder, the existing branch source is rebased onto the target (overrides.branch) unsquashed, gated, reviewed and merged",
     {
       repo: REPO,
       title: { type: "string", description: "A short title of the task" },
-      request: { type: "string", description: "The full, self-contained task for the coder" },
+      request: { type: "string", description: "The full, self-contained task for the coder; for a merge_request the reviewer's extra instructions" },
       overrides: { type: "object", description: "Settings over the repository's stored ones", properties: SETTINGS_PROPERTIES },
       tag: { ...TAG, description: `${String(TAG.description)}. Default: the system user` },
       plan: { type: "string", description: "The memory_store path of the plan the task works from (only stored)" },
-      kind: { type: "string", enum: ["task"], description: "Default: task" },
+      kind: { type: "string", enum: ["task", "merge_request"], description: "Default: task" },
+      source: { type: "string", description: "merge_request only: the existing local branch to merge, checked out in no worktree" },
     },
     ["repo", "title", "request"],
     true,
@@ -450,7 +453,7 @@ function taskActions(view: Omit<TaskView, "actions">): TaskActionName[] {
     "tasks.retry": !view.running && (view.interrupted || (view.state !== null && RETRY_STATES.includes(view.state))),
     "tasks.cancel": view.state === null || !FINAL_STATES.includes(view.state),
     "tasks.remove": !isActive(view) && view.state !== "waiting_answer",
-    "tasks.message": view.state !== null && view.state !== "merging",
+    "tasks.message": view.kind !== "merge_request" && view.state !== null && view.state !== "merging",
   };
   return (Object.keys(allowed) as TaskActionName[]).filter((name) => allowed[name]);
 }
@@ -863,7 +866,13 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
     const tag = tagParam("tasks.start", params.tag);
     if (params.plan !== undefined && nonEmpty(params.plan) === undefined) throw new FactoryError("invalid", "tasks.start: plan must not be empty");
     const plan = params.plan as string | undefined;
-    if (params.kind !== undefined && params.kind !== "task") throw new FactoryError("invalid", `tasks.start: kind ${JSON.stringify(params.kind)} is not supported yet`);
+    if (params.kind !== undefined && params.kind !== "task" && params.kind !== "merge_request") {
+      throw new FactoryError("invalid", `tasks.start: kind ${JSON.stringify(params.kind)} is not "task" or "merge_request"`);
+    }
+    const kind = (params.kind as TaskKind | undefined) ?? "task";
+    const source = nonEmpty(params.source);
+    if (kind === "merge_request" && source === undefined) throw new FactoryError("invalid", "tasks.start: a merge_request needs a source branch");
+    if (kind === "task" && params.source !== undefined) throw new FactoryError("invalid", "tasks.start: source is for a merge_request only");
     let overrides: StoredSettings = {};
     try {
       if (params.overrides !== undefined) overrides = parseSettingsFields(params.overrides as Params, "overrides.");
@@ -873,7 +882,7 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
     const repo = await primaryOf(params.repo as string, cwd);
     await requireFactoryModels(resolveSettings(await loadSettings(repo), overrides, "").models);
     try {
-      return taskView(await launchTask({ repo, title, request, overrides, tag, plan, signal, env }));
+      return taskView(await launchTask({ repo, title, request, overrides, tag, plan, kind, source, signal, env }));
     } catch (error) {
       if (error instanceof LaunchRefusedError) throw new FactoryError("refused", error.message);
       throw error;
@@ -945,6 +954,7 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
     const record = await findTask(params.id);
     const text = nonEmpty(params.text);
     if (text === undefined) throw new FactoryError("invalid", "tasks.message needs a text that is not empty");
+    if (record.kind === "merge_request") throw new FactoryError("refused", `task ${shortId(record)} is a merge request: it has no coder to message, retry or cancel it`);
     const view = await taskView(record);
     if (view.state === null) throw new FactoryError("refused", `task ${shortId(record)} has not started yet, send the message once it runs`);
     if (view.state === "merging") throw new FactoryError("refused", `task ${shortId(record)} is merging, send the message when the merge has ended`);

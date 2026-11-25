@@ -337,3 +337,20 @@ describe("runnerSpawn", () => {
     expect(runnerSpawn(command, env, { INVOCATION_ID: "abc" }, null)).toEqual({ argv: command, env });
   });
 });
+
+describe("launchTask of a merge request", () => {
+  test("startCommand carries the kind, which parseStartPayload keeps", () => {
+    const settings = resolveSettings({}, {}, "main");
+    expect(parseStartPayload(startCommand("Merge", "Read the plan", settings, "merge_request").slice("/factory start ".length)).kind).toBe("merge_request");
+  });
+
+  test("a failing hooks.after_create removes the worktree and the record, never the source branch", async () => {
+    const repo = makeRepo("repo", "main", { "factory.yaml": 'hooks:\n  after_create:\n    - ["sh", "-c", "exit 3"]\n' });
+    git(repo, "branch", "--quiet", "wave");
+    const wave = git(repo, "rev-parse", "wave");
+    await expect(launchTask({ repo, title: "Merge", request: "r", kind: "merge_request", source: "wave" })).rejects.toThrow(/hooks\.after_create/);
+    expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
+    expect(git(repo, "rev-parse", "wave")).toBe(wave);
+    expect(await listTasks()).toEqual([]);
+  });
+});

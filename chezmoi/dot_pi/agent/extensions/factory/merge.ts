@@ -11,7 +11,8 @@
  *   gate that fails on the rebased branch is reported with its command (`MergeResult` `gate_failed`): the rebase stays,
  *   so the coder fixes the change on top of the target branch
  * - Provides `rebaseWorktree`, which a run that opens uses to bring the task branch up to date the same way. It
- *   squashes the task branch onto its base first (`taskBase`): the rebase replays one commit, the task's net change
+ *   squashes the task branch onto its base first (`taskBase`): the rebase replays one commit, the task's net change.
+ *   A merge request's branch is never squashed: the rebase replays its commits and the target gets every one of them
  * - The factory's own commits run no commit hooks and are not signed (`--no-verify --no-gpg-sign`)
  * - Reports the step that cannot be undone (`intent`) right before it, so a resume can tell whether it happened
  * - Provides `mergeTask`: the `MergeResult` and the `factory-gate` data of the commands it ran. It never throws, a
@@ -24,7 +25,7 @@ import type { FactoryConfig } from "./config.ts";
 import { addAllArgs, assertCheckoutReady, git, nulList, primaryCheckout, rebaseInProgress, targetMoved, taskBase } from "./git.ts";
 import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import type { CommandResult, Exec } from "./run.ts";
-import { gateData, passed, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
+import { gateData, isMergeRequest, passed, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
 import { ERROR_TAIL_CHARS, errorText, outputTail } from "./util.ts";
 
 /** How long a merge waits for the merge lock, polling once a second. */
@@ -90,14 +91,14 @@ export interface MergeOutcome {
 }
 
 /**
- * Brings the task branch up to date: commits the worktree as `commitWorktree` does, squashes the branch onto its base,
- * then rebases it onto the target branch. A conflicting rebase is aborted with `cleanup` and its conflicting files
+ * Brings the task branch up to date: commits the worktree as `commitWorktree` does, squashes the branch onto its base
+ * (not a merge request's), then rebases it onto the target branch. A conflicting rebase is aborted with `cleanup` and its conflicting files
  * returned, else null. Any other failure throws. `--autostash` carries what the commit leaves out (protected paths)
  * over the rebase.
  */
 export async function rebaseWorktree(exec: Exec, cleanup: Exec, root: string, task: Task, protectedGlobs: string[], message = task.title): Promise<string[] | null> {
   await commitWorktree(exec, root, message, protectedGlobs);
-  await squashOntoBase(exec, root, task, message);
+  if (!isMergeRequest(task)) await squashOntoBase(exec, root, task, message);
   const rebase = await exec(["git", "rebase", "--autostash", `refs/heads/${task.mainBranch}`], { cwd: root });
   if (passed(rebase)) {
     // An autostash that did not apply cleanly leaves conflict markers, which the next commit would take.

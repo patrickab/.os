@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseFindings, readReviewerOutput, reviewPatch, runReview } from "./review.ts";
@@ -160,5 +160,17 @@ describe("runReview", () => {
         "### Message 1\n\nalso add a second line: follow-up\n\n### Message 2\n\nand a third\n",
     );
     expect(calls[0].argv.at(-1)).toContain("Follow-up messages from the user in the task file are part of the task");
+  });
+
+  test("a merge request's prompt names the branch and holds the request verbatim under its own heading, no request file", async () => {
+    const calls: { argv: string[]; options: CommandOptions }[] = [];
+    const mergeRequest: Task = { ...task, title: "Merge wave 1", request: "Read plan/w1.md.\nThe wave adds a greeting.", branch: "wave", kind: "merge_request", source: "wave" };
+    rmSync(join(reviewsDir, "round-3.request.md"), { force: true });
+    await runReview({ exec: async (argv, options) => (calls.push({ argv, options }), child()), root: "/repo", round: 3, task: mergeRequest, followUps: [], diff: { base: "b", paths: ["a"], patch: "diff\n" }, model: null, rolePrompt: undefined, reviewsDir, cancelled: () => false });
+    const prompt = calls[0].argv.at(-1)!;
+    expect(prompt).toContain('Review the merge request "Merge wave 1": the branch wave, rebased onto main, merges into it.');
+    expect(prompt).toContain(join(reviewsDir, "round-3.patch"));
+    expect(prompt.endsWith("## Instructions from the requester\n\nRead plan/w1.md.\nThe wave adds a greeting.\n")).toBe(true);
+    expect(existsSync(join(reviewsDir, "round-3.request.md"))).toBe(false);
   });
 });

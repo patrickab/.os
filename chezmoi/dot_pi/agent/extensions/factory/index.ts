@@ -35,8 +35,10 @@
  *   commit, with a commit message the coder is asked for; a part outside the task's scope goes to a new task through
  *   `factory_new_task` (registered in task sessions only, usable in a follow-up run, once per user message), on this
  *   task's target branch and merge mode
+ * - A merge request (`/factory start` with `"kind": "merge_request"`) has no coder: start and retry run its pipeline in
+ *   the background (`ops.ts`), a plain message to it is refused, and `factory_ask_supervisor` is not registered
  */
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionManager } from "@earendil-works/pi-coding-agent";
 import { followUpPrompt, registerAskSupervisorTool, registerNewTaskTool } from "./followup.ts";
 import { snapshotTree } from "./git.ts";
 import { modelsCommand } from "./models.ts";
@@ -63,7 +65,7 @@ import {
   type OpsDeps,
   type RunOpening,
 } from "./ops.ts";
-import { applyEntry, followUpMessages, messageText, rebuild, RESTING_STATES, stateDraft, wasInterrupted, type Draft, type Snapshot, type State } from "./state.ts";
+import { applyEntry, followUpMessages, isMergeRequest, messageText, rebuild, RESTING_STATES, stateDraft, wasInterrupted, type Draft, type Snapshot, type State } from "./state.ts";
 import { registerFactoryTool } from "./tool.ts";
 import { errorText } from "./util.ts";
 
@@ -118,6 +120,8 @@ export default function (pi: ExtensionAPI) {
         session.snapshot = applyEntry(session.snapshot, "factory-spawn", spawn);
       },
     });
+    // A merge request has no coder that could ask.
+    if (isMergeRequest(session.snapshot.task)) return;
     registerAskSupervisorTool(pi, {
       refusal: () => (session.snapshot?.state === "running" ? null : "only the coder of a running task may ask"),
       asked: (question, ctx) => {
@@ -131,6 +135,12 @@ export default function (pi: ExtensionAPI) {
     cwd: ctx.cwd,
     appendEntry: (customType, data) => pi.appendEntry(customType, data),
     sendUserMessage: (text) => pi.sendUserMessage(text),
+    recordRequest: (text) => {
+      // The context types it read-only, but Pi passes its session manager itself: the only way to a message without a turn.
+      const manager = ctx.sessionManager as Partial<Pick<SessionManager, "appendMessage">>;
+      if (typeof manager.appendMessage !== "function") throw new Error("this Pi cannot record a message without a turn");
+      manager.appendMessage({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() });
+    },
     sendMessage: (message, options) => pi.sendMessage(message, options),
     setStatus: (key, text) => ctx.ui.setStatus(key, text),
     isIdle: () => ctx.isIdle(),
@@ -199,6 +209,10 @@ export default function (pi: ExtensionAPI) {
     if (!atRest) return;
     // One `factory_new_task` per user message, a follow-up queued during the run included.
     if (session.followUp) session.followUp.spawnedForMessage = false;
+    if (isMergeRequest(atRest.task)) {
+      ctx.ui.notify("factory: a merge request has no coder to message, retry or cancel it", "error");
+      return { action: "handled" };
+    }
     if (atRest.state === "merging") {
       ctx.ui.notify("factory: a merge is running, send the message when it has ended", "warning");
       return { action: "handled" };

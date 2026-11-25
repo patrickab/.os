@@ -58,6 +58,8 @@ function session(cwd: string, branch: Entry[] = []) {
   let commandHandler: (args: string, ctx: any) => Promise<void> = async () => undefined;
   const entries: Entry[] = [...branch];
   const messages: string[] = [];
+  /** User messages recorded without a turn (`sessionManager.appendMessage`): a merge request's request. */
+  const requests: string[] = [];
   /** `pi.sendMessage` calls: feedback the extension sends outside a coder turn's boundary. */
   const sent: { message: any; options: any }[] = [];
   const notes: string[] = [];
@@ -92,7 +94,11 @@ function session(cwd: string, branch: Entry[] = []) {
     },
     model: undefined,
     modelRegistry: { find: () => undefined },
-    sessionManager: { getSessionId: () => "test-session", getBranch: () => branch.map((entry) => ({ type: "custom", ...entry })) },
+    sessionManager: {
+      getSessionId: () => "test-session",
+      getBranch: () => branch.map((entry) => ({ type: "custom", ...entry })),
+      appendMessage: (message: { content: { text: string }[] }) => requests.push(message.content.map((part) => part.text).join("")),
+    },
   };
   factory(pi as unknown as ExtensionAPI);
   const emit = (name: string, event: unknown = {}) => handlers.get(name)?.(event, ctx);
@@ -101,6 +107,7 @@ function session(cwd: string, branch: Entry[] = []) {
     entries,
     tools,
     messages,
+    requests,
     sent,
     notes,
     statuses,
@@ -621,5 +628,167 @@ describe("factory_ask_supervisor", () => {
     await pi.emit("before_agent_start", { messageType: "user", systemPromptOptions: { sections: {} } });
     expect(pi.of("factory-round").at(-1)).toEqual({ round: 2, trigger: "message" });
     expect(pi.states().at(-1)).toBe("running/message");
+  });
+});
+
+describe("a merge request", () => {
+  const savedPath = process.env.PATH;
+  const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const reviewBin = join(scratch, "review-bin");
+  const reviewLog = join(scratch, "review-prompts.log");
+  /** The reviewer child: a fake `pi` that logs its prompt and submits `$FAKE_REVIEW_FINDINGS` (default none). */
+  mkdirSync(reviewBin, { recursive: true });
+  writeFileSync(
+    join(reviewBin, "pi"),
+    `#!/bin/sh
+for last; do :; done
+printf '%s\\n' "$last" >> "${reviewLog}"
+echo '{"type":"session","id":"fake-review"}'
+echo "{\\"type\\":\\"tool_execution_end\\",\\"toolName\\":\\"submit_verdict\\",\\"isError\\":false,\\"result\\":{\\"details\\":{\\"findings\\":\${FAKE_REVIEW_FINDINGS:-[]}}}}"
+`,
+    { mode: 0o755 },
+  );
+  const blocker = [{ file: "wave.txt", line: 1, severity: "blocker", text: "wrong greeting" }];
+
+  beforeEach(() => {
+    process.env.PATH = `${reviewBin}:${savedPath}`;
+    process.env.PI_CODING_AGENT_DIR = join(scratch, `agent-${counter}`);
+    rmSync(reviewLog, { force: true });
+    delete process.env.FAKE_REVIEW_FINDINGS;
+  });
+  afterAll(() => {
+    process.env.PATH = savedPath;
+    if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+    delete process.env.FAKE_REVIEW_FINDINGS;
+  });
+
+  /** A branch `wave` off main with two commits (`wave.txt`, then `more.txt`), checked out in a worktree of its own. */
+  function waveWorktree(): string {
+    const worktree = join(scratch, `wave-${counter}`);
+    gitIn(repo, "worktree", "add", "--quiet", "-b", "wave", worktree, "main");
+    writeFileSync(join(worktree, "wave.txt"), "hello\n");
+    gitIn(worktree, "add", "-A");
+    gitIn(worktree, "commit", "--quiet", "-m", "feat: wave one");
+    writeFileSync(join(worktree, "more.txt"), "more\n");
+    gitIn(worktree, "add", "-A");
+    gitIn(worktree, "commit", "--quiet", "-m", "feat: wave two");
+    return worktree;
+  }
+
+  const startMergeRequest = (pi: ReturnType<typeof session>, settings: Partial<Settings> = {}) =>
+    pi.command(
+      `start ${JSON.stringify({
+        kind: "merge_request",
+        request: "Read plan/w1.md: the wave adds a greeting.",
+        title: "Merge wave 1",
+        settings: { branch: "main", merge: "auto", maxRounds: 3, review: false, models: {}, ...settings },
+      })}`,
+    );
+  const reviewPrompts = () => readFileSync(reviewLog, "utf8");
+
+  test("an approved review merges the branch unsquashed: main holds every commit of it, and no coder ever ran", async () => {
+    const worktree = waveWorktree();
+    writeFileSync(join(repo, "other.txt"), "other\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "main other");
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("done/merged");
+    expect(pi.states()).toEqual(["running/start", "merging/passed", "done/merged"]);
+    expect(pi.of("factory-task")[0]).toMatchObject({ kind: "merge_request", source: "wave", branch: "wave", mainBranch: "main" });
+    // Rebased onto the moved main, both commits replayed one by one.
+    expect(gitIn(repo, "log", "--format=%s", "main")).toBe("feat: wave two\nfeat: wave one\nmain other\nbase");
+    expect(gitIn(repo, "rev-parse", "main")).toBe(gitIn(repo, "rev-parse", "wave"));
+    expect(pi.of("factory-gate").map((gate) => gate.phase)).toEqual(["gates"]);
+    expect(pi.of("factory-review")).toHaveLength(1);
+    // `review: false` in the settings: a merge request is reviewed anyway, with the request in the prompt.
+    expect(reviewPrompts()).toContain("## Instructions from the requester\n\nRead plan/w1.md: the wave adds a greeting.");
+    expect(reviewPrompts()).toContain("the branch wave, rebased onto main");
+    expect(pi.requests).toEqual(["Read plan/w1.md: the wave adds a greeting."]);
+    expect([pi.messages, pi.sent]).toEqual([[], []]);
+    expect(pi.tools).toEqual(["factory", "factory_new_task"]);
+  });
+
+  test("a rejected review blocks it with the findings recorded, opens no round and sends no coder prompt; retry reviews again", async () => {
+    process.env.FAKE_REVIEW_FINDINGS = JSON.stringify(blocker);
+    const pi = session(waveWorktree());
+    await startMergeRequest(pi, { merge: "review" });
+    await pi.until("blocked/review_rejected");
+    expect(pi.of("factory-review")[0]).toMatchObject({ status: "ok", approved: false, findings: blocker });
+    expect(pi.of("factory-round")).toEqual([{ round: 1, trigger: "start" }]);
+    expect([pi.messages, pi.sent]).toEqual([[], []]);
+    expect(gitIn(repo, "log", "--format=%s", "main")).toBe("base");
+
+    delete process.env.FAKE_REVIEW_FINDINGS;
+    await pi.command("retry");
+    await pi.until("waiting_approve/passed");
+    expect(pi.of("factory-round").at(-1)).toEqual({ round: 2, trigger: "retry" });
+    expect(pi.of("factory-review")).toHaveLength(2);
+    expect([pi.messages, pi.sent]).toEqual([[], []]);
+    await pi.command("approve");
+    await pi.until("done/merged");
+    expect(gitIn(repo, "log", "--format=%s", "main")).toBe("feat: wave two\nfeat: wave one\nbase");
+  });
+
+  test("a rebase conflict blocks it with reason conflict, the rebase aborted and nothing reviewed", async () => {
+    const worktree = waveWorktree();
+    writeFileSync(join(repo, "wave.txt"), "main's own\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "main wave.txt");
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("blocked/conflict");
+    expect(pi.of("factory-round")).toEqual([{ round: 1, trigger: "start" }]);
+    expect(pi.of("factory-review")).toEqual([]);
+    expect(gitIn(worktree, "status", "--porcelain")).toBe("");
+    expect(gitIn(worktree, "log", "--format=%s")).toBe("feat: wave two\nfeat: wave one\nbase");
+  });
+
+  test("a failing gate blocks it with reason gates, its output in the gate entry", async () => {
+    const worktree = waveWorktree();
+    gitIn(worktree, "rm", "--quiet", "required.txt");
+    gitIn(worktree, "commit", "--quiet", "-m", "drop required");
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("blocked/gates");
+    expect(pi.of("factory-gate")).toEqual([expect.objectContaining({ phase: "gates", exitCode: 1 })]);
+    expect(pi.of("factory-review")).toEqual([]);
+    expect([pi.messages, pi.sent]).toEqual([[], []]);
+  });
+
+  test("a plain message is refused: it opens no round", async () => {
+    const pi = session(waveWorktree());
+    await startMergeRequest(pi);
+    await pi.until("done/merged");
+    expect(await pi.emit("input", { text: "also fix x" })).toEqual({ action: "handled" });
+    expect(pi.notes).toEqual(["error: factory: a merge request has no coder to message, retry or cancel it"]);
+    expect(pi.states().at(-1)).toBe("done/merged");
+  });
+
+  test("one interrupted mid-pipeline resumes blocked, the rebase it left aborted, and retry runs it to the merge", async () => {
+    const worktree = waveWorktree();
+    // The rebase a killed pipeline left in progress: onto a main that changed wave.txt as well, which main then dropped.
+    writeFileSync(join(repo, "wave.txt"), "main's own\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "main wave.txt");
+    expect(() => gitIn(worktree, "rebase", "main")).toThrow();
+    gitIn(repo, "reset", "--quiet", "--hard", "HEAD~1");
+    const settings: Settings = { branch: "main", merge: "auto", maxRounds: 3, review: false, models: {} };
+    const task = { title: "Merge wave 1", request: "R", settings, branch: "wave", mainBranch: "main", baseSha: gitIn(repo, "rev-parse", "wave"), protocol: 2, kind: "merge_request", source: "wave" };
+    const pi = session(worktree, [
+      { customType: "factory-task", data: task },
+      { customType: "factory-round", data: { round: 1, trigger: "start" } },
+      { customType: "factory-state", data: { state: "running", round: 1, reason: "start" } },
+    ]);
+    await pi.emit("session_start");
+    expect(pi.states().at(-1)).toBe("blocked/interrupted");
+    expect(gitIn(worktree, "status", "--porcelain")).toBe("");
+    expect(pi.tools).toEqual(["factory", "factory_new_task"]);
+    await pi.command("retry");
+    await pi.until("done/merged");
+    expect(pi.of("factory-round").at(-1)).toEqual({ round: 2, trigger: "retry" });
+    expect(gitIn(repo, "log", "--format=%s", "main")).toBe("feat: wave two\nfeat: wave one\nbase");
+    expect([pi.messages, pi.sent]).toEqual([[], []]);
   });
 });

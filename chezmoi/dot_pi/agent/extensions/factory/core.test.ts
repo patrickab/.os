@@ -823,13 +823,13 @@ describe("task tags", () => {
     expect([stored.tag, stored.plan, stored.kind]).toEqual(["plugin/m1/w1", "plan/plugin/m1/w1.md", "task"]);
   }, 30_000);
 
-  test("tasks.start refuses a malformed tag, an empty plan and a kind other than task before any worktree", async () => {
+  test("tasks.start refuses a malformed tag, an empty plan and an unknown kind before any worktree", async () => {
     const repo = makeRepo();
     for (const tag of ["", "a//b", "/a", "a/", "a b", "ä"]) {
       await expectError(callAction("tasks.start", { title: "t", request: "r", tag }, { cwd: repo }), "invalid", "is not segments of");
     }
     await expectError(callAction("tasks.start", { title: "t", request: "r", plan: " " }, { cwd: repo }), "invalid", "plan must not be empty");
-    await expectError(callAction("tasks.start", { title: "t", request: "r", kind: "merge_request" }, { cwd: repo }), "invalid", 'kind "merge_request" is not supported yet');
+    await expectError(callAction("tasks.start", { title: "t", request: "r", kind: "epic" }, { cwd: repo }), "invalid", 'kind "epic" is not "task" or "merge_request"');
     expect(await listTasks()).toEqual([]);
     expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
   });
@@ -954,5 +954,56 @@ describe("waiting_answer", () => {
     appendFileSync(path, `${JSON.stringify({ type: "custom", customType: "factory-state", timestamp: "t4", data: { state: "blocked", round: 1, reason: "gates" } })}\n`);
     const answered = (await callAction("tasks.get", { id: ID_1 })) as TaskView;
     expect([answered.state, answered.question]).toEqual(["blocked", null]);
+  });
+});
+
+describe("merge requests", () => {
+  /** A repo with a branch `wave` one commit ahead of main, checked out nowhere. */
+  function waveRepo(): string {
+    const repo = makeRepo();
+    git(repo, "checkout", "--quiet", "-b", "wave");
+    writeFileSync(join(repo, "w.txt"), "w\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "--quiet", "-m", "wave");
+    git(repo, "checkout", "--quiet", "main");
+    return repo;
+  }
+  const mergeRequest = (repo: string, more: Record<string, unknown> = {}) =>
+    callAction("tasks.start", { title: "Merge wave", request: "Read plan/w.md", kind: "merge_request", source: "wave", overrides: { branch: "main" }, ...more }, { cwd: repo });
+
+  test("tasks.start refuses a merge request without source, source on a task, source = target, a source checked out or missing, before any worktree", async () => {
+    const repo = waveRepo();
+    await expectError(mergeRequest(repo, { source: undefined }), "invalid", "a merge_request needs a source branch");
+    await expectError(callAction("tasks.start", { title: "t", request: "r", source: "wave" }, { cwd: repo }), "invalid", "source is for a merge_request only");
+    await expectError(mergeRequest(repo, { source: "main" }), "refused", "the source branch main is the target branch itself");
+    await expectError(mergeRequest(repo, { source: "gone" }), "refused", "the source branch gone does not exist locally");
+    const holder = join(caseDir, "holder");
+    git(repo, "worktree", "add", "--quiet", holder, "wave");
+    await expectError(mergeRequest(repo), "refused", `the source branch wave is checked out in ${holder}`);
+    expect(await listTasks()).toEqual([]);
+    expect(git(repo, "worktree", "list").split("\n")).toHaveLength(2);
+  });
+
+  test("a merge request's worktree checks the source out; message is refused and never offered; remove keeps the source branch", async () => {
+    const repo = waveRepo();
+    const wave = git(repo, "rev-parse", "wave");
+    const view = (await mergeRequest(repo, { tag: "plugin/w2" })) as TaskView;
+    expect([view.kind, view.branch, view.tag]).toEqual(["merge_request", "wave", "plugin/w2"]);
+    const record = await recordOf(view);
+    expect(git(record.worktree, "symbolic-ref", "--short", "HEAD")).toBe("wave");
+    await until(async () => (await stateOf(record)) === "waiting_approve");
+    await until(() => runnerEnded(record));
+    expect(prompts()).toEqual(["prompt /factory start"]);
+
+    const resting = (await callAction("tasks.get", { id: record.id })) as TaskView;
+    expect(resting.actions).toEqual(["tasks.approve", "tasks.cancel", "tasks.remove"]);
+    await expectError(callAction("tasks.message", { id: record.id, text: "hi" }), "refused", "is a merge request: it has no coder to message");
+    expect(prompts()).toEqual(["prompt /factory start"]);
+
+    // The wave's commit is not on main, yet removing drops nothing: the source branch stays.
+    expect(await callAction("tasks.remove", { id: record.id })).toEqual({ removed: record.id, dropped: null });
+    expect(existsSync(record.worktree)).toBe(false);
+    expect(git(repo, "rev-parse", "wave")).toBe(wave);
+    expect(await listTasks()).toEqual([]);
   });
 });
