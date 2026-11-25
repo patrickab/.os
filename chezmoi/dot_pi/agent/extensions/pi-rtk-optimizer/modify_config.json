@@ -1,0 +1,12 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* pi-rtk-optimizer: no "RTK rewrite: old -> new" notice per shell command; every other setting stays the user's. */ -}}
+{{- $config := dict -}}
+{{- if .chezmoi.stdin -}}
+{{-   $config = fromJson .chezmoi.stdin -}}
+{{- end -}}
+{{- $config = setValueAtPath "showRewriteNotifications" false $config -}}
+{{- if and .chezmoi.stdin (eq (toJson $config) (toJson (fromJson .chezmoi.stdin))) -}}
+{{-   .chezmoi.stdin -}}
+{{- else -}}
+{{-   toPrettyJson $config -}}
+{{- end -}}
