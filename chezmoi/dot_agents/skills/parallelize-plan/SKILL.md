@@ -77,6 +77,7 @@ central branch ◀── every approved wave merges here
    - a scout checks the plan's file lists against the code and marks each gap `MISSING FROM PLAN`
    - status (explored, partly, stale) goes into the memory's description
 2. **Contract section** for the wave: the interfaces its tasks share, which task owns which files, decisions taken
+   - a file more than one task edits is named there, and those tasks get an order (`after`), unless their edits are in clearly separate places. Two parallel tasks in one file cost a conflict round each
 3. **Describe** the wave: `plan/<tag>.md` (title line, what it delivers, its tasks). Tracks and milestones get theirs once
 4. **Declare** the wave, once, with all its tasks:
    ```
