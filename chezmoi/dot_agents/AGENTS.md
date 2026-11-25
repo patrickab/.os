@@ -322,11 +322,11 @@ Long tool output degrades later reasoning and hides the current state from the u
 - Generate these three files through `/repomix`. Keep their scopes complementary.
 - Keep repository-specific guide paths and task-specific loading rules in that repository's `AGENTS.md`, not this global standard.
 
-### At the start of every task
+### Repository context at the start of a task
 
-1. Read each of the three context files above whenever present, even if another is missing. Do not create absent files merely to start a task.
-2. For each distinct `Generated from <hash>` revision, run `git log --stat <hash>..HEAD` to inspect commit messages and changed files since generation. These read-only provenance checks are permitted without separate git authorization.
-3. Account for working-tree caveats and relevant current edits: the recorded commit does not describe uncommitted state.
+1. **Started with a brief** (a factory task, a subagent task): read what the brief names, nothing else from `.docs`.
+2. **Started without one** (a session the user talks to): read `.docs/module-map.md` when present, and `.docs/architecture.md` when the task touches contracts, data flow or more than one component. `.docs/system-overview.md` only for questions about concepts or workflows. Do not create absent files merely to start a task.
+3. **Before relying on one of these files**: run `git log --stat <hash>..HEAD` for its `Generated from <hash>` line to inspect what changed since generation. These read-only provenance checks are permitted without separate git authorization. The recorded commit does not describe uncommitted state.
 4. If provenance is missing/unavailable or changes invalidate the context, verify relevant facts against source and notify the user to run `/repomix`. Never treat stale summaries as authority.
 5. Load optional repository-maintained guides only when relevant to the task.
 
