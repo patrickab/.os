@@ -12,7 +12,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { commitMessageFallback, isConventionalTitle } from "./commitmsg.ts";
 import { loadTaskFiles, type TaskFiles } from "./config.ts";
 import { initDraft } from "./draft.ts";
-import { abortLeftoverRebase, git, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, taskBase, taskDiff, taskGit } from "./git.ts";
+import { abortLeftoverRebase, git, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, taskBase, taskDiff, taskGit, trackedChanges, treeDiff } from "./git.ts";
 import { mergeTask, rebaseWorktree } from "./merge.ts";
 import { runMerge, runMergeRequest, type MergeRequestSteps, type PipelineSteps } from "./pipeline.ts";
 import { runReview } from "./review.ts";
@@ -156,6 +156,7 @@ function targetTip(exec: Exec, cwd: string, mainBranch: string): Promise<string>
 /**
  * The rules of the current run, read once per run: from the task's base, a merge request's from its target's tip. A
  * merge request's base is where its source forked, which can be old: a retry is held to the gates the target has now.
+ * `finishMerge` reads a merge request's again.
  */
 export function taskFiles(deps: OpsDeps, task: Task): Promise<TaskFiles> {
   const { session, cwd } = deps;
@@ -224,12 +225,17 @@ export function pipelineSteps(deps: OpsDeps, task: Task, taskFilesNow: TaskFiles
   };
 }
 
-/** `pipelineSteps`, the worktree's uncommitted changes and the unsquashed rebase of a merge request. */
+/**
+ * `pipelineSteps`, the worktree's changes to tracked files and the unsquashed rebase of a merge request. Its diff is
+ * HEAD's tree, the one the fast-forward gives the target, not the working tree: untracked files are never reviewed.
+ */
 function mergeRequestSteps(deps: OpsDeps, task: Task, taskFilesNow: TaskFiles): MergeRequestSteps {
   const { runner } = deps.session;
+  const root = deps.cwd;
   return {
     ...pipelineSteps(deps, task, taskFilesNow, true),
-    dirty: async () => (await git(runner.run, deps.cwd, ["status", "--porcelain"])) !== "",
+    diff: async () => treeDiff(runner.run, root, await taskBase(runner.run, root, task), await git(runner.run, root, ["rev-parse", "HEAD^{tree}"]), taskFilesNow.config.lockfiles),
+    dirty: () => trackedChanges(runner.run, root),
     rebase: () => rebaseWorktree(runner.run, runner.cleanup, deps.cwd, task, taskFilesNow.config.protected),
   };
 }
@@ -268,6 +274,8 @@ export async function finishMerge(deps: OpsDeps, current: Snapshot): Promise<voi
   const { session } = deps;
   let drafts: Draft[];
   try {
+    // The merge rebases onto the target's tip: a merge request's merge gates come from there, not from its run's start.
+    if (isMergeRequest(current.task)) session.files = undefined;
     const mergeSteps = pipelineSteps(deps, current.task, await taskFiles(deps, current.task), true);
     drafts = await runMerge(current, mergeSteps.config(), mergeSteps);
   } catch (error) {

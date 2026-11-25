@@ -14,8 +14,9 @@
  * - Provides `runMergeRequest`: the pipeline of a merge request, which has no coder. Its branch is rebased onto the
  *   target (`MergeRequestSteps.rebase`, unsquashed), the gates run, the reviewer reviews the whole diff whatever
  *   `settings.review` says, then it passes into `merging` or the wait for approve. Nothing opens a round: uncommitted
- *   changes in its worktree, a rejected review, a conflict or a failed gate end it `blocked` (`dirty`,
- *   `review_rejected`, `conflict`, `gates`), and so does a conflict or a failed merge gate in its `runMerge`
+ *   changes to tracked files in its worktree (before the rebase or left by a gate), a rejected review, a conflict
+ *   or a failed gate end it `blocked` (`dirty`, `review_rejected`, `conflict`, `gates`), and so does a conflict, a
+ *   failed merge gate or a merge gate that left tracked files changed in its `runMerge`
  * - A hook or gate that exits `INFRA_EXIT` (75, EX_TEMPFAIL) says the environment is broken, not the change: the task
  *   ends `blocked`, `infra: <last output line>`, without feedback to the coder. A retry starts the next round once it is fixed
  */
@@ -64,7 +65,7 @@ export interface PipelineSteps {
 }
 
 export interface MergeRequestSteps extends PipelineSteps {
-  /** True when the worktree holds uncommitted changes (untracked files included, ignored ones not). */
+  /** True when tracked files in the worktree differ from HEAD. Untracked files do not count: they are never merged. */
   dirty(): Promise<boolean>;
   /** Rebases the branch onto the target without squashing it: the conflicting files, null when it went clean. */
   rebase(): Promise<string[] | null>;
@@ -142,6 +143,8 @@ export async function runMerge(snapshot: Snapshot, config: FactoryConfig, steps:
       if (gate.exitCode === INFRA_EXIT && !gate.killed) return [...drafts, stateDraft("blocked", round, `infra: ${lastLine(gate.output)}`)];
       return problem("gates", `After the rebase onto ${snapshot.task.mainBranch}: ${commandFeedback(round, argv, gate)}`);
     }
+    case "dirty":
+      return [...drafts, stateDraft("blocked", round, "dirty")];
     case "merged": {
       const { merge } = result;
       // A failed `after_merge` hook cannot undo the merge: the task is done, and says what is left to do.
@@ -161,7 +164,7 @@ export async function runMergeRequest(snapshot: Snapshot, steps: MergeRequestSte
   const end = (state: State, reason: string): Draft[] => [...drafts, stateDraft(state, round, reason)];
   try {
     const config = steps.config();
-    // Only the source's commits are reviewed and merged: what lies uncommitted is never committed for them.
+    // Only the source's commits are gated, reviewed and merged: what lies uncommitted is never committed for them.
     if (await steps.dirty()) return end("blocked", "dirty");
     steps.status(`round ${round}: rebase onto ${task.mainBranch}`);
     const conflicts = await steps.rebase();
@@ -174,6 +177,8 @@ export async function runMergeRequest(snapshot: Snapshot, steps: MergeRequestSte
       if (steps.cancelled()) return end("cancelled", "cancelled");
       if (!passed(result)) return end("blocked", "gates");
     }
+    // A gate that rewrote a tracked file passed on a tree the target would never get.
+    if (await steps.dirty()) return end("blocked", "dirty");
 
     steps.status(`round ${round}: diff`);
     const diff = await steps.diff();

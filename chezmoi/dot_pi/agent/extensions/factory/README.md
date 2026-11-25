@@ -121,8 +121,11 @@ problems go back to the coder. A passed round merges into the target branch, or 
   every one of them by fast-forward), the `gates` run (not `after_code`), the reviewer reviews the whole diff against
   the target whatever `review` says, with `request` verbatim in its prompt under its own heading as its instructions.
   Approved: the normal merge queue (`merge_gates`, fast-forward), with `merge: review` after `waiting_approve`
-- Nothing is ever committed for it: uncommitted changes in its worktree (untracked files included, ignored ones not)
-  end it `blocked` `dirty` before the rebase; clean them up or commit them to the source, then retry
+- Nothing is ever committed for it: the gates, the review and the merge all see the source's committed tree.
+  Uncommitted changes to tracked files end it `blocked` `dirty`: found before the rebase (clean them up or commit
+  them to the source, then retry), or left by a gate or a merge gate (which then passed on a tree the target would
+  not get; the gate must not rewrite tracked files, or the source must already hold what it writes). Untracked files
+  never count, are not reviewed and are not merged: what a gate leaves behind does not block a retry
 - Nothing opens a round: a rejected review ends `blocked` `review_rejected`, a rebase conflict `blocked` `conflict`,
   failed gates or merge gates `blocked` `gates`; findings and gate output stay in the timeline. `tasks.retry` runs it
   again from the rebase. `tasks.message` is refused and not among its actions, and `factory_ask_supervisor` is not
@@ -134,7 +137,8 @@ problems go back to the coder. A passed round merges into the target branch, or 
   the plain rebase, and the conflicts they resolved come back as `blocked` `conflict`: its owner rebases it onto the
   target first
 - `factory.yaml` and the reviewer prompt come from the target branch's tip when a run starts (the start and every
-  retry), never from the source: a retry is held to the gates the target has gained meanwhile. The `factory-task` entry
+  retry), and read again when its merge starts (auto or approve), never from the source: a retry is held to the gates
+  the target has gained meanwhile, and the merge to the merge gates of the tip it rebases onto. The `factory-task` entry
   (timeline kind `task`) carries `kind` and `source` (null for a `task`)
 
 ## Commit message

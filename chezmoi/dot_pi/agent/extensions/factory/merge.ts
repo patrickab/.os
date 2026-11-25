@@ -23,7 +23,7 @@
 import { basename, join } from "node:path";
 import { commitMessageFallback, commitText, type CommitMessage } from "./commitmsg.ts";
 import type { FactoryConfig } from "./config.ts";
-import { addAllArgs, assertCheckoutReady, git, nulList, primaryCheckout, rebaseInProgress, targetMoved, taskBase } from "./git.ts";
+import { addAllArgs, assertCheckoutReady, git, nulList, primaryCheckout, rebaseInProgress, targetMoved, taskBase, trackedChanges } from "./git.ts";
 import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import type { CommandResult, Exec } from "./run.ts";
 import { gateData, isMergeRequest, passed, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
@@ -78,13 +78,15 @@ export type GateFailure = { argv: string[]; result: CommandResult };
 /**
  * How a merge ended. `merged`: the main branch is at the task's commit (`merge.ok`). `failed`: nothing was merged, the
  * `factory-merge` data says why. `conflict`: the rebase onto the main branch conflicted on `files` and was aborted.
- * `gate_failed`: a merge gate failed on the rebased branch. Nothing was merged after a `conflict` or a `gate_failed`.
+ * `gate_failed`: a merge gate failed on the rebased branch. `dirty`: a merge request's tracked files differ from HEAD
+ * after its merge gates, which then passed on a tree the target would not get. Nothing was merged after any of these.
  */
 export type MergeResult =
   | { kind: "merged"; merge: MergeData }
   | { kind: "failed"; merge: MergeData }
   | { kind: "conflict"; files: string[] }
-  | { kind: "gate_failed"; gate: GateFailure };
+  | { kind: "gate_failed"; gate: GateFailure }
+  | { kind: "dirty" };
 
 export interface MergeOutcome {
   gates: GateData[];
@@ -197,6 +199,8 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
         if (!passed(gate)) return { kind: "gate_failed", gate: { argv, result: gate } };
       }
       ontoBefore = onto;
+      // The fast-forward moves the target to HEAD: a merge request's working tree must be what was gated.
+      if (isMergeRequest(task) && (await trackedChanges(exec, root))) return { kind: "dirty" };
 
       status("fast-forward");
       await assertCheckoutReady(exec, root, task.branch);

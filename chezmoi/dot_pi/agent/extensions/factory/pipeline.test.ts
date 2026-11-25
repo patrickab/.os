@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { DEFAULT_PROTECTED, type FactoryConfig } from "./config.ts";
 import { runMerge, runMergeRequest, runRound, type PipelineSteps } from "./pipeline.ts";
 import type { CommandResult } from "./run.ts";
-import { stateDraft, type Draft, type MergeData, type ReviewData, type ReviewStatus, type Settings, type Snapshot } from "./state.ts";
+import { gateData, stateDraft, type Draft, type MergeData, type ReviewData, type ReviewStatus, type Settings, type Snapshot } from "./state.ts";
 
 const config: FactoryConfig = {
   hooks: { after_create: [], after_code: [["fmt"]], after_merge: [] },
@@ -364,11 +364,25 @@ describe("runMergeRequest", () => {
     expect(dirty.calls).toEqual([]);
   });
 
+  test("a gate that leaves tracked files changed blocks it as dirty before the review (review 2, finding 1)", async () => {
+    const checks = [false, true];
+    const rewritten = Object.assign(steps(), { dirty: async () => checks.shift() ?? true });
+    expect(states(await runMergeRequest(mergeRequestOf(), rewritten))).toEqual(["blocked/dirty"]);
+    expect(rewritten.calls).toEqual(["rebase", "lint", "test"]);
+  });
+
   test("its merge blocks on a conflict or a failed merge gate instead of a coder round", async () => {
     const conflict = await runMerge(mergeRequestOf(), config, fakeSteps({ merge: async () => ({ gates: [], result: { kind: "conflict", files: ["a.ts"] } }) }));
     const gate = { argv: ["test"], result: commandResult(1, "fail") };
     const gateFailed = await runMerge(mergeRequestOf(), config, fakeSteps({ merge: async () => ({ gates: [], result: { kind: "gate_failed", gate } }) }));
     expect([conflict, gateFailed].map(states)).toEqual([["blocked/conflict"], ["blocked/gates"]]);
     expect([...conflict, ...gateFailed].map((entry) => entry.type)).toEqual(["custom", "custom"]);
+  });
+
+  test("its merge blocks as dirty when a merge gate left tracked files changed (review 2, finding 1)", async () => {
+    const gate = gateData(1, "merge_gates", ["fmt"], commandResult(0, ""));
+    const entries = await runMerge(mergeRequestOf(), config, fakeSteps({ merge: async () => ({ gates: [gate], result: { kind: "dirty" } }) }));
+    expect(kinds(entries)).toEqual(["factory-gate", "factory-state"]);
+    expect(states(entries)).toEqual(["blocked/dirty"]);
   });
 });

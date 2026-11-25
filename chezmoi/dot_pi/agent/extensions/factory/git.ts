@@ -5,8 +5,9 @@
  * - Provides the task's git identity (`taskGit`), its primary checkout, the snapshot of a working tree as a tree id
  *   (`snapshotTree`), the task's diff base and its diff (changed paths and patch, untracked files included)
  * - Provides the checks a merge needs before it writes: the checkout is on its branch with no git operation in
- *   progress (`assertCheckoutReady`). Tells a rebase in progress and its conflicting files (`rebaseInProgress`), and
- *   aborts one a killed merge left behind (`abortLeftoverRebase`)
+ *   progress (`assertCheckoutReady`), and whether tracked files differ from HEAD (`trackedChanges`). Tells a rebase
+ *   in progress and its conflicting files (`rebaseInProgress`), and aborts one a killed merge left behind
+ *   (`abortLeftoverRebase`)
  * - Provides the added and removed lines per changed path (`diffFileCounts`)
  * - Provides where the task's own change starts (`taskBase`) and whether its target branch moved past it (`targetMoved`)
  * - Nothing here writes the checkout's own index or its files: staging goes through a scratch index
@@ -146,6 +147,11 @@ export async function rebaseInProgress(exec: Exec, root: string): Promise<string
   const operations = await operationsInProgress(exec, root);
   if (!operations.some((name) => name.startsWith("rebase-"))) return null;
   return nulList(await git(exec, root, ["diff", "--name-only", "--diff-filter=U", "-z"]));
+}
+
+/** True when tracked files in `root` differ from HEAD, staged or not. Untracked files do not count. */
+export async function trackedChanges(exec: Exec, root: string): Promise<boolean> {
+  return (await git(exec, root, ["status", "--porcelain", "--untracked-files=no"])) !== "";
 }
 
 /** Aborts a rebase that a killed merge left behind in `root`. `exec` must be one a cancel does not stop. */
