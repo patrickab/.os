@@ -176,6 +176,8 @@ export async function runMergeRequest(snapshot: Snapshot, steps: MergeRequestSte
     const conflicts = await steps.rebase();
     if (steps.cancelled()) return end("cancelled", "cancelled");
     if (conflicts) return end("blocked", "conflict");
+    // The rebase brings the target's .gitignore: a file it stopped ignoring was there before the run and is no gate output.
+    if (await steps.dirty()) return end("blocked", "dirty");
     try {
       for (const argv of config.gates) {
         steps.status(`round ${round}: gates ${argv.join(" ")}`);

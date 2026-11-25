@@ -206,6 +206,8 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
       status(attempt === 1 ? `rebase onto ${task.mainBranch}` : `rebase onto ${task.mainBranch} again, it moved (attempt ${attempt})`);
       const conflicts = await rebaseWorktree(exec, cleanup, root, task, config.protected, text);
       if (conflicts) return { kind: "conflict", files: conflicts };
+      // The rebase brings the target's .gitignore: a file it stopped ignoring is somebody's work, not merge gate output.
+      if (isMergeRequest(task) && (await uncommittedFiles(exec, root))) return { kind: "dirty" };
       head = await git(exec, root, ["rev-parse", "HEAD"]);
       // Merge gates that are the round's gates, on the base the round passed them on (the squash keeps the tree), would
       // only repeat that run.

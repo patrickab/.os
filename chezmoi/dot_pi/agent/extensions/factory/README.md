@@ -122,8 +122,9 @@ problems go back to the coder. A passed round merges into the target branch, or 
   the target whatever `review` says, with `request` verbatim in its prompt under its own heading as its instructions.
   Approved: the normal merge queue (`merge_gates`, fast-forward), with `merge: review` after `waiting_approve`
 - Nothing is ever committed for it: whenever its gates or review run, its worktree holds nothing but the source's
-  committed tree, the one the target gets. Before a run (start and retry) and before its merge, a changed tracked file
-  or an untracked file that is not ignored ends it `blocked` `dirty` and is left as it is: the factory made the
+  committed tree, the one the target gets. Before a run (start and retry), before its merge and again after each
+  rebase (the target's .gitignore may stop ignoring a file), a changed tracked file or an untracked file that is not
+  ignored (whatever `status.showUntrackedFiles` says) ends it `blocked` `dirty` and is left as it is: the factory made the
   worktree clean, so it is somebody's work (commit it to the source or remove it, then retry). After the gates and
   after the merge gates, passed or failed, a changed tracked file ends it `blocked` `dirty` too (the gate must not
   rewrite tracked files, or the source must already hold what it writes), and the untracked files they left are

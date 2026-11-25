@@ -944,6 +944,43 @@ echo "{\\"type\\":\\"tool_execution_end\\",\\"toolName\\":\\"submit_verdict\\",\
     expect(readFileSync(join(worktree, "helper.txt"), "utf8")).toBe("helper\n");
   });
 
+  test("a forgotten file blocks the retry as dirty even with status.showUntrackedFiles=no (review 4, finding 1)", async () => {
+    writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [sh, -c, 'test ! -f wave.txt || test -f helper.txt']\n");
+    gitIn(repo, "commit", "--quiet", "-am", "wave.txt needs helper.txt");
+    gitIn(repo, "config", "status.showUntrackedFiles", "no");
+    const main = gitIn(repo, "rev-parse", "main");
+    const worktree = waveWorktree();
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("blocked/gates");
+    writeFileSync(join(worktree, "helper.txt"), "helper\n");
+    writeFileSync(join(worktree, "wave.txt"), "hello, uses helper\n");
+    gitIn(worktree, "commit", "--quiet", "-am", "fix: use helper");
+    await pi.command("retry");
+    await pi.until("blocked/dirty");
+    expect(pi.states()).toEqual(["running/start", "blocked/gates", "running/retry", "blocked/dirty"]);
+    expect(gitIn(repo, "rev-parse", "main")).toBe(main);
+    expect(readFileSync(join(worktree, "helper.txt"), "utf8")).toBe("helper\n");
+  });
+
+  test("a file the target's .gitignore stops ignoring blocks it as dirty after the rebase and stays (review 4, finding 2)", async () => {
+    writeFileSync(join(repo, ".gitignore"), "*.env\n");
+    gitIn(repo, "add", ".gitignore");
+    gitIn(repo, "commit", "--quiet", "-m", "ignore env files");
+    const worktree = waveWorktree();
+    writeFileSync(join(worktree, "local.env"), "secret\n");
+    expect(gitIn(worktree, "status", "--porcelain")).toBe("");
+    writeFileSync(join(repo, ".gitignore"), "*.envrc\n");
+    gitIn(repo, "commit", "--quiet", "-am", "ignore envrc files only");
+    const main = gitIn(repo, "rev-parse", "main");
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("blocked/dirty");
+    expect(pi.states()).toEqual(["running/start", "blocked/dirty"]);
+    expect(gitIn(repo, "rev-parse", "main")).toBe(main);
+    expect(readFileSync(join(worktree, "local.env"), "utf8")).toBe("secret\n");
+  });
+
   test("an ignored file neither blocks it nor is removed, whether a person or a gate put it there (review 3, finding 1)", async () => {
     writeFileSync(join(repo, ".gitignore"), "*.cache\n");
     writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [sh, -c, 'echo x > gate.cache']\nmerge_gates:\n  - [sh, -c, 'echo x > merge.cache']\n");

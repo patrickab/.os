@@ -158,7 +158,9 @@ export async function trackedChanges(exec: Exec, root: string): Promise<boolean>
 
 /** True when `root` holds anything but HEAD's tree: tracked files that differ, or untracked files that are not ignored. */
 export async function uncommittedFiles(exec: Exec, root: string): Promise<boolean> {
-  return (await git(exec, root, ["status", "--porcelain"])) !== "";
+  // Explicit, since porcelain follows `status.showUntrackedFiles` and `git clean` does not: with `no` set, a file would
+  // pass this check and still be deleted.
+  return (await git(exec, root, ["status", "--porcelain", "--untracked-files=normal"])) !== "";
 }
 
 /** Deletes the untracked files of `root` that are not ignored. Never `-x`: ignored files (caches, deps) stay. */
