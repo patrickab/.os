@@ -1,144 +1,146 @@
 ---
 name: parallelize-plan
-description: Supervise the implementation of an approved plan with parallel subagents. Tracks, milestones, waves and tasks, one contract as source of truth, a shared map in memory-store, strict file ownership, one reviewer per milestone as quality gate. Use when the user asks to implement a plan, issues or tasks with subagents in parallel.
+description: Supervise the implementation of an approved plan through the agent factory. Tracks, milestones, waves and tasks, one contract as source of truth, a shared map in memory-store, every task a factory task with deterministic gates, every wave a reviewed merge request into one central branch. Use when the user asks to implement a plan, issues or tasks with agents in parallel.
 ---
 
 Roles: the supervisor plans, briefs and decides. Scouts read, coders implement, the reviewer is the quality gate.
-The supervisor never reads code in bulk. Agents are spawned and steered with the harness's own delegation tools.
+The supervisor never reads code in bulk.
+
+- **Coders and reviewers are factory tasks** (`agent-factory`): own worktree, gates after every turn, tests in the merge queue, one commit per task, visible on the board. Reach the factory with the `factory` tool, the MCP tool, or the CLI `factory <action> '<json>'` (`factory --help`)
+- **Scouts are ordinary subagents**: they write no code, so there is nothing to gate or merge
+- **Memory** is `memory-store` (CLI `memory-store`, or its MCP tools): the plan, the contract, the map
 
 ## Terms
 
-| Term | What it is | Runs | Ends with |
-|---|---|---|---|
-| **Track** | An independent part of the plan with its own worktree. Tracks share no files and meet only at the contract | in parallel | its last milestone |
-| **Milestone** | A reviewed state of one track | in order within a track | the reviewer's approval and the merge into the central worktree |
-| **Wave** | The coders working at the same time | in order within a milestone | the full suite passing |
-| **Task** | One commit: a ticket with a title and a description | in order within one coder | its acceptance commands pass, committed |
+| Term | What it is | In the factory |
+|---|---|---|
+| **Track** | An independent part of the plan | first segment of the tag |
+| **Milestone** | A goal inside a track, a group of waves | middle segment of the tag |
+| **Wave** | The tasks that are built and reviewed together | a branch off central, and one merge request back into it |
+| **Task** | One commit: a ticket with a title and a description | one factory task that merges into the wave's branch |
 
 ```
-central worktree ◀── every approved milestone merges here; tracks branch from it
+central branch ◀── every approved wave merges here
 │
-├─ TRACK a                      worktree a
+├─ TRACK a
 │   ├─ MILESTONE 1
-│   │   ├─ WAVE 1   coder: task → task → task     coder: task → task
-│   │   │           └ full suite once
-│   │   ├─ WAVE 2   ...
-│   │   └ reviewer → merge into central
+│   │   ├─ WAVE 1   branch a-1-1   task ─▶ task       task        (tag a/1/1)
+│   │   │           └ merge request ─▶ reviewer ─▶ central
+│   │   └─ WAVE 2   ...
 │   └─ MILESTONE 2
-└─ TRACK b                      worktree b
-    └─ MILESTONE 1
-        └─ WAVE 1   coder: task → task
+└─ TRACK b
+    └─ WAVE 1       branch b-1     task ─▶ task                   (tag b/1)
 ```
 
-A small plan is one track, one milestone, one wave. Unused levels cost nothing: add none for their own sake.
+- **Wave and task carry the mechanics.** Track and milestone are names: they make the plan readable and the board navigable, the factory enforces nothing on them
+- **Order comes only from dependencies.** Any two waves run at once when they share no files and neither needs the other's finished code, whatever track or milestone they are in
+- A small plan is one wave. Add no level for its own sake: the tag is as deep as the plan (`<wave>`, `<track>/<wave>`, `<track>/<milestone>/<wave>`)
 
 **Task = ticket = commit**
-- **Title**: a conventional commit subject (`feat(memory): add describe op`)
+- **Title**: a conventional commit subject (`feat(memory): add describe op`). The factory uses it as the commit message's first line
 - **Description**: sections of layered bullet points: what changes and why, never how the work went
-- Title and description are the commit message, word for word. Cut tasks so that this is true
-- What a coder needs beyond that (what to read, owned files, acceptance commands) belongs in the brief around the tasks, not in them
+- Cut tasks so that title and description are true as the commit message
+- What a coder needs beyond that (what to read, acceptance) surrounds them in the task's request
 
 ## 1. Plan
 
 1. **Tracks**: split the plan into parts that share no files
-2. **Contract**: write down what tracks and coders share, exact: signatures, routes with request and response shapes, types, env vars
+2. **Contract**: write down what tracks and coders share, exact: signatures, routes with request and response shapes, types, env vars. And the invariants: what must hold whatever the implementation does
    - a need for an *interface* goes into the contract and creates no order
-   - a need for *finished code* creates an order: the next wave, or the next task of the same coder
-3. **Milestones** per track: each a state that can be reviewed and merged on its own
-4. **Tasks** per milestone: each one commit, verifiable on its own. Chain neighbours (a neighbour builds on the task before it)
-5. **Waves**: give each chain to one coder. Chains with disjoint files form a wave
-   - a chain is too long when one agent cannot finish it within its context: split it over two waves
-   - repeated work of one shape (many endpoints, many scenes): one coder goes first as pilot, its lessons go into the briefs, then the rest fan out
+   - a need for *finished code* creates an order: the next wave, or the next task of a chain
+3. **Milestones** per track, where they help reading the plan
+4. **Tasks**: each one commit, verifiable on its own. Chain neighbours (a neighbour builds on the task before it)
+5. **Waves**: chains with disjoint files form a wave
+   - repeated work of one shape (many endpoints, many scenes): one task goes first as pilot, its lessons go into the other requests, then the rest fan out
 
 ## 2. Setup (once)
 
-- **memory_store**: `memory-store create <project>/<plan> map handoffs briefs run`
-  - `<project>` = last segment of the repo path. Agents use the `memory-store` CLI, or the MCP tools when they have them
-  - `run/contract.md` supervisor only · `map/<concern>` facts · `briefs/<wave>-<coder>.md` · `handoffs/<wave>-<coder>.md` · `run/feedback` facts · `run/retro.md` · `run/overview.md`
-- **Worktrees** through the `worktree` skill, never the user's primary checkout. Verify each is complete (venv, `node_modules`)
-  - one **central** worktree: every approved milestone merges here, the user looks only here. It starts from the primary checkout's current state, uncommitted work included, taken as a snapshot (`git stash create`) that leaves the checkout untouched
-  - one per track, branched from central. A track starts its next milestone from the current central
-- **Dependencies**: the supervisor adds them in the track's worktree as a commit of its own, and smoke-imports them before writing the contract
+- **memory_store**: `memory-store create <project>/<plan> map plan run`
+  - `<project>` = last segment of the repo path
+  - `run/contract.md` supervisor only · `map/<concern>` facts · `plan/<tag prefix>.md` the description of a track, milestone or wave, which the board shows · `run/feedback` facts · `run/retro.md` · `run/overview.md`
+  - a document: `memory-store apply <store> --ops '[{"op":"write_doc","path":"plan/a/1.md","text":"..."}]'`. A first fact: `{"op":"add","path":"map/x","description":"...","text":"..."}`
+- **Central branch and worktree** through the `worktree` skill, never the user's primary checkout: every approved wave merges here, the user looks only here
+  - it starts from the primary checkout's current state, uncommitted work included, taken as a snapshot (`git stash create`) that leaves the checkout untouched
+  - it must hold the repo's committed `factory.yaml` (`factory config.get`), and factory models must be set (`factory models.get`)
+- **Dependencies**: the supervisor adds them on the central branch as a commit of its own, and smoke-imports them, before the waves that need them branch
 - **Contract core** (top of `run/contract.md`, every agent reads it):
-  - worktrees and how to run tests and checks there
   - services and data nobody touches
-  - the agent rules (section 5), written once here, never repeated in briefs
+  - the agent rules (section 5), written once here, never repeated in requests
 
 ## 3. Wave loop
 
-1. **Scout** every concern the wave needs that `memory-store ls <store> map` does not show as explored
+1. **Scout** every concern the wave needs that `memory-store ls <store>` does not show as explored
    - a scout writes `map/<concern>`: facts with `file:line`, no prose
    - a scout checks the plan's file lists against the code and marks each gap `MISSING FROM PLAN`
    - status (explored, partly, stale) goes into the memory's description
-2. **Contract section** for the wave:
-   - the interfaces its coders share
-   - the ownership table: each file in exactly one row, including importers of what gets removed
-   - decisions taken
-3. **Brief** per coder, a file in `briefs/`:
-   - what to read, by name: contract sections, map memories
-   - owned files
-   - its tasks in order, each with title, description and acceptance commands
-   - "files of an interrupted predecessor may exist: verify them, then continue"
-   - the spawn task is one line: "execute brief `<path>`"
-4. **Spawn** the whole wave at once. Wait for completion notices, never poll
-5. **Collect**: read the handoffs' change requests and risks. Decide each, write accepted ones into the contract
-6. **Test**: the full suite runs once per wave, after all coders finished. Coders run their own tests while they work
-   - a failure becomes a fix task for a fresh coder, briefed with the owning coder's handoff
-7. The wave shrinks to one line in the contract
+2. **Contract section** for the wave: the interfaces its tasks share, which task owns which files, decisions taken
+3. **Describe** the wave: `plan/<tag>.md` (what it delivers, its tasks). Tracks and milestones get theirs once
+4. **Branch**: `git branch <plan>-<track>-<wave> <central branch>`, checked out nowhere
+5. **Start** every task that waits for no other task:
+   ```
+   factory tasks.start '{"title": "<task title>", "request": "<see below>", "tag": "<track>/<milestone>/<wave>",
+     "plan": "<project>/<plan>", "overrides": {"branch": "<wave branch>", "merge": "auto"}}'
+   ```
+   - **request**: read `run/contract.md` and the named map memories · the task's description · its acceptance commands · "files of an interrupted predecessor may exist: verify them, then continue"
+   - the next task of a chain starts when its predecessor is `done`
+6. **Wait**: `factory tasks.wait '{"tag": "<track>/<milestone>/<wave>"}'`, never poll. It returns when all rest or one needs attention:
+   - `waiting_answer`: the coder asked (`question`). Decide, answer with `tasks.message`
+   - `blocked`: read `tasks.timeline`, then `tasks.message` with what to change, or `tasks.retry`, or cut the task differently
+   - tasks you have dealt with go into `ignore` on the next wait
+7. **Collect**: read the change requests and risks at the end of each task's last message. Decide each, write accepted ones into the contract
+8. **Merge request**, when every task of the wave is `done`:
+   ```
+   factory tasks.start '{"kind": "merge_request", "source": "<wave branch>", "title": "<what the wave delivers>",
+     "request": "<reviewer instructions>", "tag": "<same tag>", "plan": "<project>/<plan>",
+     "overrides": {"branch": "<central branch>"}}'
+   ```
+   - the factory rebases the wave, runs the gates, has the reviewer judge the whole diff, runs the tests in the merge queue and fast-forwards central. The wave's commits stay as they are
+   - `blocked` `review_rejected`: the findings (timeline) become tasks of the same wave and tag, then `tasks.retry` the merge request
+   - a second rejection on the same topic: decide the rule yourself, write it into the contract as an invariant, and give the fix task that rule, not the reviewer's smallest fix
+   - `blocked` `conflict` or `gates`: a task in the wave fixes it on the wave's branch, then `tasks.retry`
+9. The wave shrinks to one line in the contract
 
-After the last wave of a milestone:
+After the last wave: one integrated smoke run in the central worktree, then the retro, then the final overview.
 
-1. **Review** (section 4). Rejected: the findings become the tasks of one more wave, then review again
-2. **Merge** the track into the central worktree on approval. A conflict is resolved in the track, tested there, then merged
+## 4. Reviewer (the merge request's `request`)
 
-After the last milestone: the full suite and one integrated smoke run in the central worktree, then the retro, then the final overview.
+The reviewer is the quality gate: no wave reaches central without its approval. It only sees code that passed the gates.
 
-## 4. Reviewer (one per milestone, independent, a strong model, with a shell)
-
-The reviewer is the quality gate: nothing merges without its approval.
-
-- **Receives** only code that passed the full suite
-- **Reads**: the milestone's diff (the track's commits since it branched from central) · the map · `.docs/architecture.md` and `.docs/module-map.md` where they exist · the track's and milestone's part of the plan and contract
-- **May spawn scouts** for what it needs to know about the surrounding code
-- **Judges**:
+- **What to read**, by name: `run/contract.md` · the wave's `plan/` documents · the map memories · `.docs/architecture.md` and `.docs/module-map.md` where they exist
+- **What the wave was meant to deliver**, and the contract's invariants it must hold
+- **What to judge**:
   - follows the repo's code and project standards (`AGENTS.md`)
   - reuses what exists instead of rebuilding it
   - no complexity the task does not need
   - readable by a human, documented where a reader needs it
   - modular, reusable where reuse is real
   - correct at the edges the tests do not cover
-  - test gaps: behaviour the milestone adds or changes that no test would catch if it broke
-- **Writes** `handoffs/<track>-<milestone>-review.md`: `approved`, or `rejected` with findings as blocker, major, minor, each with `file:line`, an executed failing scenario where one exists, and the smallest fix
+  - test gaps: behaviour the wave adds or changes that no test would catch if it broke
+- Reject only for a blocker or major finding, each with `file:line`, an executed failing scenario where one exists, and the smallest fix
 
 ## 5. Agent rules (go into the contract core)
 
-- **Done** means your acceptance commands pass. Run only the tests and checks of your own files
-- **Files**: write only what you own
-  - a file outside your list that breaks only through your change: smallest fix, name it in the handoff
-  - a failure from a file you do not own: report, do not fix
-- **Interfaces** a sibling has not delivered: build against the contract, say so in the handoff
-- **Ask** the supervisor only when a decision changes the contract or risks data. Otherwise take the conservative choice and name it
-- **Commit** each finished task, and nothing else in git: `git add -- <its files>`, then `git commit -m "<title>" -m "<description>" -- <its files>`. Retry when the index is locked
-- **Never**: any other git state change · manifests or lockfiles (name the dependency in the handoff) · the user's running services
+- **Done** means your acceptance commands pass. The factory runs the gates after your turn and the tests at merge, and commits for you
+- **Scope**: change what the task needs. A file another task of the wave owns: build against the contract instead, and say so
+- **Ask** the supervisor (`factory_ask_supervisor`) only when a decision changes the contract or risks data. Otherwise take the conservative choice and name it
+- **Never**: manifests or lockfiles (name the dependency) · the user's running services · existing tests bent to pass (adapt one only where the contract changes the behaviour it asserts)
 - **Map**: `update` a fact you found wrong, `add` what the next agent would have to rediscover
-- **Handoff**, state only, no narrative: tasks committed (hash, title) · each acceptance command with its last output line · contract change requests with exact shapes · open risks
-- **Feedback**: a problem with the brief, the protocol, the tools or the environment is one `add` to `run/feedback`: `kind · what happened · cost · suggestion`
+- **Last message**, state only: contract change requests with exact shapes · open risks · what you left undone
+- **Feedback**: a problem with the request, the protocol, the tools or the environment is one `add` to `run/feedback`: `kind · what happened · cost · suggestion`
 
 ## 6. Supervisor rules
 
-- **Contract changes**: decide, write the contract, then per affected agent: running → steer it with the delta; finished → a small edit you apply yourself, a larger one becomes a task of the next wave
-- **Context**: an agent that runs low hands off at a task boundary, a fresh agent continues from that handoff
-- **No duplicates**: never spawn a replacement before the original is idle
-- **Two agents never write the same file**
-- **Cleanup**: remove the track worktrees and every unit and process the run registered. The central worktree stays
-- **Git**: only the supervisor merges, and only an approved milestone, into central. Nothing is pushed and the primary checkout is never touched
-- **User**: no reports and no review requests unless the user asked for them (e.g. a report per milestone). Ask only for materially different tradeoffs, otherwise take the conservative choice and record it in the contract. The one message the user reads is the final overview (section 8)
+- **Contract changes**: decide, write the contract, then per affected task: running → `tasks.message` with the delta; done → a new task in the wave
+- **No duplicates**: never start a replacement before the original rests
+- **Git**: the factory merges. The supervisor creates branches and the central worktree, never pushes, never touches the primary checkout
+- **Cleanup**: remove the wave branches that merged and every unit and process the run registered. The central worktree and the tasks on the board stay
+- **User**: no reports and no review requests unless the user asked for them. Ask only for materially different tradeoffs, otherwise take the conservative choice and record it in the contract. The one message the user reads is the final overview (section 8). The board shows the rest
 
 ## 7. Retro (last)
 
 - Read `run/feedback`. Write `run/retro.md`, one page:
   - the costliest problems with evidence and cost
-  - one proposed edit each (this skill, `AGENTS.md`, the repo, the environment) or "no action"
+  - one proposed edit each (this skill, `AGENTS.md`, the repo, the factory, the environment) or "no action"
   - what worked
 - The user reads it when they want and asks for the edits they approve
 
@@ -149,4 +151,3 @@ What the user needs to understand how the new system works, at a high level. It 
 - **Content**: what exists now and how its parts work together · how to use it · what behaves differently than before · decisions taken on the user's behalf · what is left open · where the central worktree is
 - **Not in it**: how the run went, per-task detail, anything the user can get by asking
 - **Form**: sections of bullet points. A section may open with two or three sentences. As long as the information needs, no longer
-

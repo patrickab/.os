@@ -1,87 +1,71 @@
-# Subagent protocol
+# Parallel work protocol
 
-How parallel subagent work (the `parallelize-plan` skill) is set up, and why. A single subagent without a plan needs none of this: `AGENTS.md`, section 8. The binding rules live in the files under "Where it is defined": change them there, then bring this page in line.
+How parallel agent work (the `parallelize-plan` skill) is set up, and why. A single subagent without a plan needs none of this: `AGENTS.md`, section 8. The binding rules live in the files under "Where it is defined": change them there, then bring this page in line.
 
 ## Goal
 
-High-quality, conflict-free parallel work at low token cost. The expensive supervisor decides and never reads code in bulk, cheap scouts read, coders write, nothing is explored twice, and the user reads one message at the end.
+High-quality, conflict-free parallel work at low token cost, with quality gates that are code and not goodwill. The expensive supervisor decides and never reads code in bulk, cheap scouts read, coders write as factory tasks, a reviewer gates every wave, and the user reads one message at the end and sees the rest on the board.
+
+## Three parts
+
+| Part | Does | Where |
+|---|---|---|
+| `parallelize-plan` skill | the orchestration: how a plan becomes tracks, waves and tasks, who decides what | `dot_agents/skills/parallelize-plan/SKILL.md` |
+| `agent-factory` | the execution: a task in its own worktree, gates after every turn, tests in the merge queue, review, merge | `github.com/patrickab/agent-factory` (`factory` CLI, MCP server, Pi extension) |
+| `memory-store` | the memory: contract, map of the codebase, plan descriptions, feedback | `github.com/patrickab/memory-store` (`memory-store` CLI, MCP server) |
 
 ## Terms
 
-| Term | What it is | Runs |
+| Term | What it is | In the factory |
 |---|---|---|
-| Track | An independent part of the plan with its own worktree | in parallel |
-| Milestone | A reviewed state of one track, merged into the central worktree | in order within a track |
-| Wave | The coders working at the same time, tested once together | in order within a milestone |
-| Task | One commit: a ticket whose title and description are the commit message | in order within one coder |
+| Track | An independent part of the plan | first segment of a task's tag |
+| Milestone | A goal inside a track, a group of waves | middle segment of the tag |
+| Wave | The tasks built and reviewed together | a branch off central and one merge request back |
+| Task | One commit: a ticket whose title and description are the commit message | a factory task merging into the wave's branch |
+
+A task the user starts alone belongs to no wave: its tag is the user's name.
 
 ## Roles
 
-| Role | Model tier | Does |
+| Role | Runs as | Does |
 |---|---|---|
-| supervisor | strongest | plans tracks, milestones, waves and tasks, writes the contract and the briefs, decides, merges approved milestones |
-| `oracle` | strongest | second opinion on hard decisions |
-| `scout` | cheap and fast | reads code, writes the map, checks the plan's file lists against the code |
-| `worker` (coder) | strong coder | implements its chain of tasks and commits each |
-| `reviewer` | strong coder, high thinking | the quality gate per milestone, with shell and write tools so it reproduces instead of guessing, may spawn scouts |
-| other roles | cheap and fast | default, so nothing inherits the supervisor's model unnoticed |
-
-Limits: nesting depth 2, 10 tasks per call, 10 at once.
-
-## Run memory_store
-
-One memory_store per plan in memory-store (`<project>/<plan>`), reached with the `memory-store` CLI or the MCP tools.
-
-```
-run/contract.md              supervisor only: core (rules, environment) + what tracks and coders share
-map/<concern>                facts per concern, written by scouts, corrected by whoever changes the code
-briefs/<wave>-<coder>.md     what to read, owned files, the coder's tasks in order
-handoffs/<wave>-<coder>.md   state only: commits, acceptance output, change requests, risks
-handoffs/<track>-<milestone>-review.md
-run/feedback                 one fact per protocol problem or suggestion, from every agent
-run/retro.md                 the supervisor's suggestions, read by the user when they want
-run/overview.md              the final overview, also the supervisor's last message
-```
+| supervisor | the session the user talks to, strongest model | plans, writes the contract and the requests, answers questions, decides on blocked tasks |
+| scout | subagent, cheap and fast | reads code, writes the map, checks the plan's file lists against the code |
+| coder | factory task | implements one task; asks through `factory_ask_supervisor` |
+| reviewer | factory merge request | judges a wave's whole diff, approves or rejects with findings |
 
 ## Flow
 
 ```
-central worktree ◀─────────────────────────────── merge ◀──┐
-   │ branch                                                │
-   ▼                                                       │
-track worktree                                             │
-   scouts ──▶ map ──▶ contract: shared interfaces, ownership│
-                         │                                 │
-        coders in parallel, disjoint files, a commit per task
-                         │                                 │
-        handoffs ──▶ supervisor decides ──▶ full suite, once per wave
-                         │  (next wave, until the milestone is built)
-                         ▼                                 │
-        reviewer: the milestone's diff ──▶ approved ───────┘
-                         └─▶ rejected: findings become one more wave
+central branch ◀──────────────── fast-forward ◀─────────────┐
+   │ git branch                                             │
+   ▼                                                        │
+wave branch ◀── merge queue (tests) ◀── task ◀── gates ◀── coder turn
+   │                                     ▲                  │
+   │            supervisor: tasks.wait ──┘ answers, retries │
+   ▼                                                        │
+merge request: rebase ─▶ gates ─▶ reviewer ─▶ approved ─────┘
+                                     └─▶ rejected: findings become tasks of the wave, then retry
 ```
 
-After the last milestone: the full suite and one smoke run in the central worktree, the retro from `run/feedback`, the final overview.
+After the last wave: one smoke run in the central worktree, the retro from `run/feedback`, the final overview.
 
 ## Why it is built this way
 
 | Choice | Reason |
 |---|---|
-| Tracks with their own worktree | Independent parts never see each other's half-finished work and never wait for each other |
-| A central worktree that milestones merge into | The user looks at one place, and every track starts its next milestone from what the others delivered |
-| Contract with exact shared interfaces before a wave starts | Parallel agents that agree late drift apart, and late changes miss agents that already finished |
+| Coders are factory tasks, not subagents | Gates, tests and merge are deterministic code, every step is on the board, and a task survives a restart |
+| The factory has its own message path (`tasks.wait`, `tasks.message`, `factory_ask_supervisor`) | No dependency on a harness's subagent or intercom tools, and questions stay in the task's timeline |
+| A wave is a branch with a merge request | Tasks of a wave see each other's merged work, the reviewer judges them together, and central only ever receives reviewed code |
+| Merge requests are never squashed | A task is a commit: the history says what the plan said |
+| Track and milestone are only tag segments | The plan's shape can change without touching the factory |
+| A central branch per plan | The user looks at one place and nothing touches the primary checkout |
+| Contract with exact shared interfaces and invariants before a wave starts | Parallel agents that agree late drift apart, and a rule left unsaid costs a review round per hole |
 | Interface needs go into the contract, code needs create an order | What only needs a signature can be built at the same time, which is where the parallelism comes from |
-| Disjoint file ownership inside a wave | No conflicts, one environment per track |
-| Task = ticket = commit | The plan, the brief and the history say the same thing once, and a task maps onto a factory task |
-| Briefs as files, a one-line spawn task | Inline briefs hit the harness's argument limit and cannot be reread |
 | Map in memory-store, facts updated by id | Agents read only their concerns, parallel corrections do not collide, nothing is scouted twice |
 | Scouts check the plan against the code | Plans miss files, and a gap found before the wave is cheap |
-| Handoff holds state only | The supervisor reads every handoff: narrative there costs the most expensive tokens |
-| Feedback apart from handoffs | How the work went improves the protocol, not the task: read once, at the end |
-| Agent rules once in the contract core | Repeating them in every brief costs tokens, and each question to the supervisor costs a turn |
-| Full suite once per wave, coders run their own tests | Tasks that pass alone can break together, and running everything per agent wastes time |
-| One reviewer per milestone, only on code that passed the suite | Passing tests missed a data-loss bug the review found, and review tokens are not spent on broken code |
-| No reports during the run, one final overview | The user's attention and the supervisor's tokens go to one text worth keeping |
+| Feedback apart from the work | How the work went improves the protocol, not the task: read once, at the end |
+| No reports during the run, one final overview | The user's attention goes to one text worth keeping, the board shows the rest |
 | Wait on a signal, bound every wait | Polling delays follow-up work, an unbounded wait can cost the session |
 
 ## Where it is defined
@@ -93,8 +77,7 @@ Sources in `~/.os/chezmoi/`, deployed by chezmoi.
 | The protocol itself | `dot_agents/skills/parallelize-plan/SKILL.md` |
 | Testing, waiting, long-running processes, plain subagent use | `dot_agents/AGENTS.md`, sections 2 "Testing", 5 "Waiting", 7, 8 |
 | Working in a worktree (overlay venv, packages, submodules) | `dot_agents/skills/worktree/SKILL.md` |
-| Models, thinking and tools per role | `dot_pi/agent/modify_settings.json` (`subagents`) |
-| The memory the run lives in | `github.com/patrickab/memory-store` (`memory-store` CLI, MCP server `memory`) |
-| Depth and parallel limits | `dot_pi/agent/extensions/subagent/config.json` |
+| Models, thinking and tools of scouts | `dot_pi/agent/modify_settings.json` (`subagents`) |
+| Models of coders and reviewers | the factory's settings per repo (`factory settings.get`) |
+| A repo's gates, hooks and role prompts | its `factory.yaml` and `.factory/agents/` |
 | Worktrees ready to work in | `dot_local/bin/executable_agent-worktree`, `/worktree` in `dot_pi/agent/extensions/worktree.ts` |
-| Pi packages (`pi-subagents`, `pi-interactive-shell`, ...) | `run_onchange_after_install-pi-packages.sh` |
