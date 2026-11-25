@@ -75,118 +75,20 @@ end
 --        Palette
 -----------------------------------------
 
--- Names are roles, not literal colors: `white*` is the main text and `black*`
--- the raised surfaces (popups, cursor line), so both invert in `light`.
--- Every key exists in both palettes.
-local palettes = {}
-
-palettes.dark = {
-  fg               = "#DED7D0",
-  bg               = '#121116',
-  none             = '#121116',
-  dark             = '#0E0D12',
-  comment          = "#686069",
-  popup_back       = '#515761',
-  cursor_fg        = '#121116',
-  context          = '#515761',
-  cursor_bg        = '#EFD472',
-  cursor_line      = '#24211E', -- terminal bg (gigachad-bot page, oklch 19% 0.008 70) +1 level
-  accent           = '#BBBBBB',
-  diff_add         = '#8CD881',
-  diff_change      = '#6CAEC0',
-  cl_bg            = "#524A51",
-  diff_text        = '#568BB4',
-  line_fg          = "#524A51",
-  line_bg          = '#121116',
-  gutter_bg        = '#121116',
-  non_text         = "#7F737D",
-  selection_bg     = "#817081",
-  selection_fg     = "#615262",
-  vsplit_fg        = "#cccccc",
-  vsplit_bg        = '#211F26',
-  visual_select_bg = '#36322E', -- same warm hue, +2 levels
-
-  red_key_w  = "#FF7DA3",
-  red_err    = "#D95555",
-  green_func = '#7EC49D',
-  green      = "#7EC49D",
-  blue_type  = '#8BB8D0',
-  cyan       = '#A1CCCE',
-  black1     = '#1C1B21',
-  black      = '#0E0D12',
-  white1     = "#DED7D0",
-  white      = "#DED7D0",
-  variable   = "#8C8380",
-  gray_punc  = "#938884",
-  gray2      = "#7F737D",
-  gray1      = '#413E41',
-  gray       = "#322F32",
-  orange     = "#E0828D",
-  boolean    = "#B898DD",
-  orange_wr  = "#E39A65",
-  pink       = "#BDA9D4",
-  yellow     = "#EFD472",
-
-  -- :terminal ANSI colors that must stay readable on this background
-  ansi_black        = '#0E0D12',
-  ansi_white        = "#DED7D0",
-  ansi_bright_white = "#DED7D0",
-}
-
-palettes.light = {
-  fg               = "#2A2520",
-  bg               = '#F0E9DB', -- faint cream, the one color to tune the light editor background
-  none             = '#F0E9DB',
-  dark             = '#EAE2D3',
-  comment          = "#8C827B", -- neutrals match dark-mode contrast: text > punctuation > variable > comment
-  popup_back       = '#C9BFAC',
-  cursor_fg        = '#2B2620',
-  context          = '#C9BFAC',
-  cursor_bg        = '#D9962B',
-  cursor_line      = '#EAE3D4',
-  accent           = '#7A7068',
-  diff_add         = '#3F8A3B',
-  diff_change      = '#2F7F9A',
-  cl_bg            = "#D8CFBA",
-  diff_text        = '#2F6F95',
-  line_fg          = "#A1968A",
-  line_bg          = '#F0E9DB',
-  gutter_bg        = '#F0E9DB',
-  non_text         = "#A39889",
-  selection_bg     = "#D3C8B0",
-  selection_fg     = "#DBD0B8",
-  vsplit_fg        = "#CFC5B2",
-  vsplit_bg        = '#DFD7C6',
-  visual_select_bg = '#DED7C9', -- gigachad-bot ::selection tint at 12%, one step past cursor_line
-
-  -- Syntax inks: dark-palette hues at OKLCH L~0.53, chroma pushed to the sRGB
-  -- limit so they pop on cream. Yellow shifts to amber, a true yellow is
-  -- unreadable on light.
-  red_key_w  = "#C61365",
-  red_err    = "#C51D24",
-  green_func = '#00814F',
-  green      = "#00814F",
-  blue_type  = '#0573AA',
-  cyan       = '#017E88',
-  black1     = '#E5DDCD',
-  black      = '#EAE2D3',
-  white1     = "#2A2520",
-  white      = "#2A2520",
-  variable   = "#696059",
-  gray_punc  = "#645B54",
-  gray2      = "#8F8478",
-  gray1      = '#D6CCB6',
-  gray       = "#E2D9C4",
-  orange     = "#C43351",
-  boolean    = "#8635CC",
-  orange_wr  = "#BB4F04",
-  pink       = "#805AB8",
-  yellow     = "#A56D03",
-
-  ansi_black        = '#34302B',
-  ansi_white        = "#8F8579",
-  ansi_bright_white = "#52493F",
-}
+-- Single source of truth: ~/.os/assets/theme/palette.json, rendered by chezmoi to
+-- ~/.config/theme/palette.json (also feeds Pi and gigachad-bot). Names are roles,
+-- not literal colors: `white*` is the main text and `black*` the raised surfaces
+-- (popups, cursor line), so both invert in `light`. Every key exists in both palettes.
+local palette_file = vim.fn.stdpath 'config' .. '/../theme/palette.json'
+local ok, source = pcall(function()
+  return vim.json.decode(table.concat(vim.fn.readfile(palette_file), '\n'))
+end)
+if not ok then
+  vim.notify('oh-lucy-evening: cannot read ' .. palette_file .. ' (run chezmoi apply)', vim.log.levels.ERROR)
+  return
+end
+local palettes = { dark = source.dark, light = source.light }
+local markup = source.markup
 
 local colors = palettes[vim.o.background == 'light' and 'light' or 'dark']
 
@@ -612,25 +514,25 @@ theme.plugins = {
     -- Markup (markdown, rst, org, and doc comments in every language)
     ["@markup"]                = { fg = colors.fg },
     ["@markup.heading"]        = { fg = colors.white, style = 'bold' },
-    ["@markup.heading.1"]      = { fg = colors.red_key_w, style = 'bold' },
-    ["@markup.heading.2"]      = { fg = colors.orange, style = 'bold' },
-    ["@markup.heading.3"]      = { fg = colors.yellow, style = 'bold' },
-    ["@markup.heading.4"]      = { fg = colors.green_func, style = 'bold' },
-    ["@markup.heading.5"]      = { fg = colors.blue_type, style = 'bold' },
-    ["@markup.heading.6"]      = { fg = colors.pink, style = 'bold' },
-    ["@markup.strong"]         = { fg = colors.white, style = 'bold' },
+    ["@markup.heading.1"]      = { fg = colors[markup.heading1], style = 'bold' },
+    ["@markup.heading.2"]      = { fg = colors[markup.heading2], style = 'bold' },
+    ["@markup.heading.3"]      = { fg = colors[markup.heading3], style = 'bold' },
+    ["@markup.heading.4"]      = { fg = colors[markup.heading4], style = 'bold' },
+    ["@markup.heading.5"]      = { fg = colors[markup.heading5], style = 'bold' },
+    ["@markup.heading.6"]      = { fg = colors[markup.heading6], style = 'bold' },
+    ["@markup.strong"]         = { fg = colors[markup.strong], style = 'bold' },
     ["@markup.italic"]         = { style = 'italic' },
     ["@markup.strikethrough"]  = { style = 'strikethrough' },
     ["@markup.underline"]      = { style = 'underline' },
-    ["@markup.raw"]            = { fg = colors.orange },
-    ["@markup.raw.block"]      = { fg = colors.orange },
-    ["@markup.quote"]          = { fg = colors.accent, style = 'italic' },
-    ["@markup.math"]           = { fg = colors.boolean },
-    ["@markup.link"]           = { fg = colors.pink },
-    ["@markup.link.label"]     = { fg = colors.white },
-    ["@markup.link.url"]       = { fg = colors.yellow, style = 'underline' },
-    ["@markup.list"]           = { fg = colors.red_key_w },
-    ["@markup.list.text"]      = { fg = colors.yellow },
+    ["@markup.raw"]            = { fg = colors[markup.raw] },
+    ["@markup.raw.block"]      = { fg = colors[markup.raw] },
+    ["@markup.quote"]          = { fg = colors[markup.quote], style = 'italic' },
+    ["@markup.math"]           = { fg = colors[markup.math] },
+    ["@markup.link"]           = { fg = colors[markup.link] },
+    ["@markup.link.label"]     = { fg = colors[markup.link_label] },
+    ["@markup.link.url"]       = { fg = colors[markup.link_url], style = 'underline' },
+    ["@markup.list"]           = { fg = colors[markup.list] },
+    ["@markup.list.text"]      = { fg = colors[markup.list_text] },
     ["@markup.list.checked"]   = { fg = colors.green_func },
     ["@markup.list.unchecked"] = { fg = colors.gray2 },
 

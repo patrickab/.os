@@ -1,28 +1,31 @@
+{{- $p := include (joinPath .chezmoi.sourceDir "../assets/theme/palette.json") | fromJson -}}
+{{- $d := $p.dark -}}
+{{- $m := $p.markup -}}
 {
   "$schema": "https://pi.dev/schemas/theme.schema.json",
   "name": "oh-lucy-evening-custom",
   "appearance": "dark",
   "vars": {
-    "bg": "#121116",
-    "dark": "#0E0D12",
-    "raised": "#1C1B21",
-    "panel": "#2B2931",
-    "split": "#211F26",
-    "fg": "#DED7D0",
-    "comment": "#686069",
-    "gray": "#7F737D",
-    "blue": "#8BB8D0",
-    "lightBlue": "#A1CCCE",
-    "pinkRed": "#FF7DA3",
-    "red": "#D95555",
-    "green": "#7EC49D",
-    "yellow": "#EFD472",
-    "purple": "#B898DD",
-    "orange": "#E39A65"
+    "bg": {{ $d.bg | quote }},
+    "dark": {{ $d.dark | quote }},
+    "raised": {{ $d.black1 | quote }},
+    "panel": {{ $d.panel | quote }},
+    "split": {{ $d.vsplit_bg | quote }},
+    "fg": {{ $d.fg | quote }},
+    "comment": {{ $d.comment | quote }},
+    "gray": {{ $d.non_text | quote }},
+    "blue": {{ $d.blue_type | quote }},
+    "lightBlue": {{ $d.cyan | quote }},
+    "pinkRed": {{ $d.red_key_w | quote }},
+    "red": {{ $d.red_err | quote }},
+    "green": {{ $d.green | quote }},
+    "yellow": {{ $d.yellow | quote }},
+    "purple": {{ $d.boolean | quote }},
+    "orange": {{ $d.orange_wr | quote }}
   },
   "colors": {
     "accent": "blue",
-    "border": "#515761",
+    "border": {{ $d.popup_back | quote }},
     "borderAccent": "blue",
     "borderMuted": "split",
     "success": "green",
@@ -40,19 +43,19 @@
     "customMessageLabel": "lightBlue",
     "toolPendingBg": "panel",
     "toolSuccessBg": "panel",
-    "toolErrorBg": "#3A272F",
+    "toolErrorBg": {{ $d.error_bg | quote }},
     "toolTitle": "lightBlue",
     "toolOutput": "fg",
-    "mdHeading": "lightBlue",
-    "mdLink": "blue",
-    "mdLinkUrl": "gray",
-    "mdCode": "lightBlue",
+    "mdHeading": {{ index $d (index $m "heading1") | quote }},
+    "mdLink": {{ index $d (index $m "link") | quote }},
+    "mdLinkUrl": {{ index $d (index $m "link_url") | quote }},
+    "mdCode": {{ index $d (index $m "raw") | quote }},
     "mdCodeBlock": "fg",
     "mdCodeBlockBorder": "split",
-    "mdQuote": "gray",
+    "mdQuote": {{ index $d (index $m "quote") | quote }},
     "mdQuoteBorder": "split",
     "mdHr": "split",
-    "mdListBullet": "blue",
+    "mdListBullet": {{ index $d (index $m "list") | quote }},
     "toolDiffAdded": "green",
     "toolDiffRemoved": "pinkRed",
     "toolDiffContext": "gray",
@@ -75,8 +78,8 @@
     "bashMode": "lightBlue"
   },
   "export": {
-    "pageBg": "#121116",
-    "cardBg": "#1C1B21",
-    "infoBg": "#211F26"
+    "pageBg": {{ $d.bg | quote }},
+    "cardBg": {{ $d.black1 | quote }},
+    "infoBg": {{ $d.vsplit_bg | quote }}
   }
 }
