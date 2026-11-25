@@ -24,7 +24,6 @@ chezmoi/
       context-usage.ts    context status for pi-host clients
       video-paste.ts      video → 8 scene frames (needs ffmpeg)
       worktree.ts         /worktree
-      factory/            agent factory: /factory commands and the task pipeline
   dot_omp/private_agent/themes/   omp theme, also read by omp-ui
 scripts/pix-models-newest-first.patch   applied to pix-models by run_onchange_after_reconcile-pi-packages
 ```
@@ -50,17 +49,14 @@ scripts/pix-models-newest-first.patch   applied to pix-models by run_onchange_af
 
 ## factory
 
-Runs a coding task on its own in a Pi session: code, gates, optional review, merge queue. Works in any repo with a
-`factory.yaml` (`/factory init` drafts one). gigachad-bot starts and monitors tasks on top of it and documents the
-behaviour: [`.docs/agent-factory.md`](https://github.com/patrickab/gigachad-bot/blob/master/.docs/agent-factory.md).
+The agent factory is its own repository: [`agent-factory`](https://github.com/patrickab/agent-factory) (core, `factory`
+CLI, `factory-mcp`, Pi extension). It runs a coding task on its own in a Pi session: code, gates, review, merge queue.
 
-- **Needs**: `git`, `flock`, and `agent-worktree` (`dot_local/bin/executable_agent-worktree`) for worktree tasks.
-- **No runtime packages.** `package.json` is for development: `bun install`, `bun test`, `bun run types` in
-  `chezmoi/dot_pi/agent/extensions/factory/`. Tests, `tsconfig.json`, `bun.lock` and `node_modules` are not deployed
-  (`.chezmoiignore`).
-- **Contract with gigachad-bot**: the `/factory` commands, the `factory-*` session entries and `draft.ts`'s
-  `initDraft(root)`. Changing one needs a commit there too.
-- **Loaded into every session**, inert until a `/factory` command or a `factory-task` entry.
+- **Installed by** `run_onchange_after_install-agent-factory.sh`: clones it to `~/git/agent-factory`, installs its
+  packages and links `factory` and `factory-mcp` into `~/.local/bin`. Update: `git pull` there.
+- **Loaded by Pi** as a package: the `../../git/agent-factory` line in `agent/modify_settings.json`.
+- **Used by** the `parallelize-plan` skill and gigachad-bot's factory board
+  ([`.docs/agent-factory.md`](https://github.com/patrickab/gigachad-bot/blob/master/.docs/agent-factory.md)).
 
 ## omp-ui
 

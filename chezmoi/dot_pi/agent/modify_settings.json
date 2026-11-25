@@ -11,7 +11,8 @@
 {{- $settings = setValueAtPath "defaultTools" (list "+codemode" "+interactive_shell" "+tool_search") $settings -}}
 {{- /* Pi's packages, declared here: Pi installs a missing one when it starts. Add or remove a line, nothing else.
        pix-models is a source only (`extensions` empty): extensions/models-picker.ts loads it as /models, because its own
-       extension patches Pi's JS and cannot override /model on the compiled binary. */ -}}
+       extension patches Pi's JS and cannot override /model on the compiled binary.
+       agent-factory is a local clone (run_onchange_after_install-agent-factory.sh makes it), the path is relative to settings.json. */ -}}
 {{- $packages := list
       "npm:pi-subagents"
       "npm:pi-intercom"
@@ -21,6 +22,7 @@
       "npm:@jangmanj/pi-hashline"
       "npm:pi-lens"
       "npm:pi-rtk-optimizer"
+      "../../git/agent-factory"
       (dict "source" "npm:@xynogen/pix-models" "extensions" (list)) -}}
 {{- $settings = setValueAtPath "packages" $packages $settings -}}
 {{- /* pi-subagents: one model per role (oracle judges, scout reads, worker writes, reviewer reviews). Unpinned roles run on the default instead of the parent's model. */ -}}
