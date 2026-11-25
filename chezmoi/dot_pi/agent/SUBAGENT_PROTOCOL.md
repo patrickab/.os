@@ -72,6 +72,7 @@ After the last wave: one smoke run in the central worktree, the retro from `run/
 | Scouts check the plan against the code | Plans miss files, and a gap found before the wave is cheap |
 | Feedback apart from the work | How the work went improves the protocol, not the task: read once, at the end |
 | No reports during the run, one final overview | The user's attention goes to one text worth keeping, the board shows the rest |
+| Easy tasks run on the small model, hard ones on the big one | Most of a plan is wiring that a cheap model does as well; the big model is spent where something has to be designed, and on every review |
 | A sketch before UI tasks are cut | What the user will look at is cheapest to correct before it is built |
 | Fixes outside every task's files are made once, on central | Two parallel tasks that both repair the same shared file collide at merge |
 

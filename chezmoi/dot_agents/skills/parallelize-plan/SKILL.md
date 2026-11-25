@@ -50,6 +50,7 @@ central branch ◀── every approved wave merges here
    - a need for *finished code* creates an order: `after` inside a wave, or the next wave
 3. **Milestones** per track, where they help reading the plan
 4. **Tasks**: each one commit, verifiable on its own
+   - each task is **easy** or **hard**. Easy: the request names the files and the change, nothing has to be designed (a rename, a fix with its finding, tests for existing behaviour, docs, wiring along a pilot). Hard: everything else, and every pilot. Easy tasks run on the project's small model, hard ones on its big one. In doubt: hard
 5. **Waves**: tasks with disjoint files, and chains of tasks that build on each other, form a wave
    - repeated work of one shape (many endpoints, many scenes): one task goes first as pilot (`after` on the others), its lessons go into the others' requests before they start
 6. **Anything the user will look at** (a screen, a layout, an output format): show a sketch and get a yes before tasks are cut
@@ -83,8 +84,9 @@ central branch ◀── every approved wave merges here
      "title": "<what the wave delivers>", "request": "<reviewer instructions, section 4>",
      "overrides": {"branch": "<central branch>"},
      "tasks": [{"key": "a", "title": "<task title>", "request": "<see below>"},
-               {"key": "b", "title": "...", "request": "...", "after": ["a"]}]}'
+               {"key": "b", "title": "...", "request": "...", "after": ["a"], "model": "small"}]}'
    ```
+   - **`model`**: `small` for an easy task; without it the task runs on the big model. The reviewer always runs on the big one
    - **a task's request**: read `run/contract.md` and the named map memories · the task's description · its acceptance commands · "files of an interrupted predecessor may exist: verify them, then continue"
    - the factory creates the wave's branch, starts each task when the tasks it waits for are done, reviews the whole wave when all are done or cancelled, and merges it into central. The wave's commits stay as they are
 5. **End the turn** with one line of state. The factory reports into this session whatever needs the supervisor, and each report starts a turn:
