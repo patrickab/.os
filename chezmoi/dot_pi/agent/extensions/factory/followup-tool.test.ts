@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { newTaskDeps } from "./followup.ts";
+import { ASK_SUPERVISOR_TOOL, newTaskDeps } from "./followup.ts";
 
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
 process.env.GIT_CONFIG_SYSTEM = "/dev/null";
@@ -53,7 +53,13 @@ function repoWithTask(): { repo: string; worktree: string; merged: string } {
 
 interface Tool {
   name: string;
-  execute: (id: string, params: unknown, signal: undefined, onUpdate: undefined, ctx: unknown) => Promise<{ isError?: boolean; content: { text: string }[] }>;
+  execute: (
+    id: string,
+    params: unknown,
+    signal: undefined,
+    onUpdate: undefined,
+    ctx: unknown,
+  ) => Promise<{ isError?: boolean; content: { text: string }[]; details?: unknown; terminate?: boolean }>;
 }
 
 function session(cwd: string, branch: { customType: string; data: unknown }[]) {
@@ -93,6 +99,7 @@ function session(cwd: string, branch: { customType: string; data: unknown }[]) {
       await emit("before_agent_start", { messageType: "user", systemPromptOptions: { sections } });
     },
     newTask: (params: unknown) => tools.get("factory_new_task")!.execute("call", params, undefined, undefined, ctx),
+    ask: (params: unknown) => tools.get(ASK_SUPERVISOR_TOOL)!.execute("call", params, undefined, undefined, ctx),
   };
 }
 
@@ -118,7 +125,7 @@ describe("factory_new_task", () => {
     const { repo, worktree, merged } = repoWithTask();
     const pi = mergedSession(worktree, merged);
     await pi.emit("session_start");
-    expect([...pi.tools.keys()]).toEqual(["factory", "factory_new_task"]);
+    expect([...pi.tools.keys()]).toEqual(["factory", "factory_new_task", "factory_ask_supervisor"]);
     expect((await pi.newTask({ title: "feat: x", handoff: "do x" })).isError).toBe(true);
 
     await pi.message();
@@ -158,5 +165,27 @@ describe("factory_new_task", () => {
     expect(result).toMatchObject({ isError: true });
     expect(result.content[0].text).toContain("only a follow-up run on a merged task");
     expect(pi.sections.factory_followup).toBeUndefined();
+  });
+});
+
+describe("factory_ask_supervisor", () => {
+  test("records the question and waiting_answer and ends the turn; refused outside a running coder turn or without a question", async () => {
+    const { worktree } = repoWithTask();
+    const pi = session(worktree, [taskEntry(), custom("factory-round", { round: 1, trigger: "start" }), custom("factory-state", { state: "blocked", round: 1, reason: "max_rounds: gates" })]);
+    await pi.emit("session_start");
+    expect(pi.tools.has(ASK_SUPERVISOR_TOOL)).toBe(true);
+    const resting = await pi.ask({ question: "Which table?" });
+    expect([resting.isError, resting.content[0].text]).toEqual([true, "factory_ask_supervisor: only the coder of a running task may ask"]);
+
+    await pi.message();
+    expect((await pi.ask({ question: " " })).content[0].text).toContain("question must not be empty");
+    const asked = await pi.ask({ question: "Which table?" });
+    expect(asked).toMatchObject({ terminate: true, details: { question: "Which table?" } });
+    expect(asked.isError).toBeUndefined();
+    expect(pi.entries.slice(-2)).toEqual([
+      { customType: "factory-question", data: { text: "Which table?" } },
+      { customType: "factory-state", data: { state: "waiting_answer", round: 2, reason: "question" } },
+    ]);
+    expect((await pi.ask({ question: "And another?" })).isError).toBe(true);
   });
 });

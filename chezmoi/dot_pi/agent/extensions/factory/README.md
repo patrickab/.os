@@ -41,7 +41,8 @@ problems go back to the coder. A passed round merges into the target branch, or 
   `branches.list`, `settings.get|set` (`{stored, resolved, defaults}`; `preview` is a stored boolean only clients
   read), `config.get` (working copy, or a branch's committed `factory.yaml`, a draft when there is none),
   `config.write` (a registered repo; checked, not committed; replaces a file only with `overwrite: true`),
-  `tasks.list|get` (a `TaskView`: record fields (`tag`, `plan`, `kind` included), last state with its time, `running` = a live runner holds it,
+  `tasks.list|get` (a `TaskView`: record fields (`tag`, `plan`, `kind` included), last state with its time, `question`
+  (the coder's open question while `waiting_answer`, else null), `running` = a live runner holds it,
   `interrupted`, the task's settings, token and cost usage of coder and reviews, `actions` = the task actions the core
   accepts now), `tasks.timeline` (session entries as `{at, kind, data}`, `since`/`next` = a byte cursor, read from
   `since` on), `tasks.diff` (base, patch, per-file added/removed lines), `tasks.start|approve|retry|cancel|remove|message`,
@@ -51,9 +52,9 @@ problems go back to the coder. A passed round merges into the target branch, or 
 - `tasks.wait {ids?, tag?, ignore?, timeoutMs?}` (`mutates: false`): exactly one of `ids` (ids or unique prefixes,
   resolved once) and `tag` (as in `tasks.list`, re-listed on every poll, so tasks started later count); `ignore` leaves
   ids out; `timeoutMs` 1000..3600000, default 600000. A task rests when no runner lives and its state is
-  `waiting_approve`, `blocked`, `done` or `cancelled`, or it is interrupted; it needs attention when it rests and is not
-  `done`. Answers `{tasks, attention: ids, timedOut}` once every watched task rests, one needs attention, the timeout
-  passes or no task is watched; an abort fails it
+  `waiting_approve`, `waiting_answer`, `blocked`, `done` or `cancelled`, or it is interrupted; it needs attention when
+  it rests and is not `done`. Answers `{tasks, attention: ids, timedOut}` once every watched task rests, one needs
+  attention, the timeout passes or no task is watched; an abort fails it
 - `tasks.import` (`hostOnly`, `{record}`): registers a task record another store kept; an existing id stays. It refuses
   a record unless `repo` is a primary checkout and `worktree` one of its linked worktrees with `branch` checked out
 - A `repo` param is a path inside the repository, relative to the caller's `cwd`, which is also its default; without
@@ -65,10 +66,10 @@ problems go back to the coder. A passed round merges into the target branch, or 
   returns. An abort before the runner is spawned kills the hook and removes the worktree and branch
 - `tasks.approve` (from `waiting_approve`), `tasks.retry` (from `blocked`, `cancelled` or interrupted), `tasks.cancel`
   (stops a live runner first), `tasks.message` (a live runner gets it as a follow-up through the task's inbox, a
-  resting or interrupted task a new runner; refused while merging). A line that reaches the inbox after the runner
+  resting or interrupted task a new runner; to a task in `waiting_answer` it is the answer; refused while merging). A line that reaches the inbox after the runner
   closed Pi goes to a successor runner. Cancel or retry of an interrupted task fails when its runner ends before it ran
 - `tasks.remove`: deletes the record, log, worktree and the task's own branch (through git) of a task that is not
-  running (an interrupted task counts as not running). It refuses a task with commits its target branch lacks or
+  running (an interrupted task counts as not running) and not in `waiting_answer`. It refuses a task with commits its target branch lacks or
   uncommitted changes; with `force: true` it removes it anyway and names what it dropped
 - `overrides` and stored settings: `merge` (`auto` | `review`), `maxRounds` (1..20), `review` (bool), `branch`,
   `models.coder`, `models.reviewer` (`provider/model`)
@@ -92,7 +93,17 @@ problems go back to the coder. A passed round merges into the target branch, or 
 - `/factory init`: write a draft `factory.yaml` into the main checkout (any session), uncommitted
 - `/factory start <json>`: `{"request", "title", "settings"}`; what the tool's runner and gigachad-bot send
 - `/factory approve`, `/factory retry`, `/factory cancel`
-- A plain message to a resting task starts a new run
+- A plain message to a resting task starts a new run; to a task in `waiting_answer` it is the answer (below)
+
+## Questions to the supervisor
+
+- In a task session the coder may call `factory_ask_supervisor {question}` while its task is `running`: it records a
+  `factory-question {text}` entry (timeline kind `question`, `TaskView.question`) and the resting state
+  `waiting_answer`, and ends the coder's turn. The round's hooks, gates and review do not run; the runner ends
+- The next message (`tasks.message`) is the answer: the coder continues the same round, with no new round, no fresh
+  round budget and no squash or rebase of the worktree (the state goes back to `running`, reason `answer`). The
+  round's steps run when that turn ends, as for any turn. In `waiting_answer` the actions are `tasks.message` and
+  `tasks.cancel`; `tasks.wait` counts the task as needing attention
 
 ## Commit message
 
@@ -135,7 +146,7 @@ problems go back to the coder. A passed round merges into the target branch, or 
 ## Entry protocol
 
 - Version 2 (`PROTOCOL_VERSION` in `state.ts`, written into every `factory-task` entry). Entries: `factory-task`,
-  `-round`, `-gate`, `-review`, `-merge-intent`, `-merge`, `-state`, `-commit-message`, `-spawn`, and
+  `-round`, `-gate`, `-review`, `-merge-intent`, `-merge`, `-state`, `-commit-message`, `-spawn`, `-question`, and
   `factory-feedback` and `factory-commit-ask` messages
 
 ## Development

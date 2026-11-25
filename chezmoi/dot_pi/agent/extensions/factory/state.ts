@@ -2,7 +2,7 @@
  * Factory task state, without Pi, git or I/O.
  *
  * - Provides the entry shapes the extension writes (`factory-task`, `-round`, `-gate`, `-review`, `-merge-intent`,
- *   `-merge`, `-state`, `-commit-message`, `-spawn`)
+ *   `-merge`, `-state`, `-commit-message`, `-spawn`, `-question`)
  * - Provides the reducer that rebuilds a task from those entries (`rebuild`), the same one that tracks it live (`applyEntry`)
  * - Provides the round budget, the `/factory start` payload check and the feedback texts the coder reads
  */
@@ -10,9 +10,10 @@ import type { CommitMessage } from "./commitmsg.ts";
 import type { CommandResult } from "./run.ts";
 import { isRecord } from "./util.ts";
 
-export type State = "running" | "waiting_approve" | "blocked" | "merging" | "done" | "cancelled";
+/** `waiting_answer`: the coder asked the supervisor (`factory-question`); the next message answers it. */
+export type State = "running" | "waiting_approve" | "waiting_answer" | "blocked" | "merging" | "done" | "cancelled";
 /** A task in one of these states does nothing until someone sends it a command or a message. */
-export const RESTING_STATES: readonly State[] = ["waiting_approve", "blocked", "done", "cancelled"];
+export const RESTING_STATES: readonly State[] = ["waiting_approve", "waiting_answer", "blocked", "done", "cancelled"];
 export type GatePhase = "hooks" | "gates" | "merge_gates" | "after_merge";
 export type Trigger = "start" | "hooks" | "gates" | "review" | "protected" | "message" | "retry" | "conflict";
 export type Severity = "blocker" | "major" | "minor";
@@ -113,6 +114,11 @@ export interface SpawnData {
   title: string;
 }
 
+/** What the coder asked the supervisor with `factory_ask_supervisor`. */
+export interface QuestionData {
+  text: string;
+}
+
 export interface StateData {
   state: State;
   round: number;
@@ -138,6 +144,8 @@ export interface Snapshot {
   mergedCommit: string | null;
   /** The coder's commit message for the next merge (`factory-commit-message`), null when the task title is used; a successful merge clears it. */
   commitMessage: CommitMessage | null;
+  /** The coder's open question while the task is `waiting_answer`, else absent. */
+  question?: string;
 }
 
 export const FEEDBACK_TYPE = "factory-feedback";
@@ -159,6 +167,7 @@ export interface EntryData {
   "factory-state": StateData;
   "factory-commit-message": CommitMessage;
   "factory-spawn": SpawnData;
+  "factory-question": QuestionData;
 }
 
 export type EntryType = keyof EntryData;
@@ -212,9 +221,11 @@ const REDUCERS: { [K in EntryType]: Reducer<K> } = {
       // A message is the merge's own: a follow-up on the merged task gets asked for a new one.
       commitMessage: ok ? null : snapshot.commitMessage,
     },
-  "factory-state": (snapshot, { state, reason }) => snapshot && { ...snapshot, state, reason, mergeIntent: null },
+  "factory-state": (snapshot, { state, reason }) =>
+    snapshot && { ...snapshot, state, reason, mergeIntent: null, question: state === "waiting_answer" ? snapshot.question : undefined },
   "factory-commit-message": (snapshot, commitMessage) => snapshot && { ...snapshot, commitMessage },
   "factory-spawn": (snapshot) => snapshot,
+  "factory-question": (snapshot, { text }) => snapshot && { ...snapshot, question: text },
 };
 
 export function isEntryType(value: string): value is EntryType {

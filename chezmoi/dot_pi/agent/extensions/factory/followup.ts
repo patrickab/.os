@@ -7,8 +7,10 @@
  * - `followUpPrompt`: the system prompt section of such a run
  * - `registerNewTaskTool`: the tool `factory_new_task {title, handoff}`, which starts a task for a part of the request
  *   outside the task's scope through `tasks.start`, on the parent's target branch and merge mode
+ * - `registerAskSupervisorTool`: the tool `factory_ask_supervisor {question}`, which records the question, rests the
+ *   task in `waiting_answer` and ends the coder's turn; the next message to the task is the answer
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { COMMIT_TITLE_RE } from "./commitmsg.ts";
 import { callAction } from "./core.ts";
 import { primaryCheckout } from "./git.ts";
@@ -71,6 +73,41 @@ export function registerNewTaskTool(pi: ExtensionAPI, gate: NewTaskToolGate): vo
       } catch (error) {
         return fail(errorText(error));
       }
+    },
+  });
+}
+
+/** What decides whether `factory_ask_supervisor` may ask now, and how a question is recorded. */
+export interface AskSupervisorToolGate {
+  /** Why the tool is refused now, null when the coder may ask. */
+  refusal(): string | null;
+  /** Records the question and rests the task in `waiting_answer`. */
+  asked(question: string, ctx: ExtensionContext): void;
+}
+
+export const ASK_SUPERVISOR_TOOL = "factory_ask_supervisor";
+
+/** Registers `factory_ask_supervisor {question}`: a terminating call, so the turn ends with the question. */
+export function registerAskSupervisorTool(pi: ExtensionAPI, gate: AskSupervisorToolGate): void {
+  pi.registerTool({
+    name: ASK_SUPERVISOR_TOOL,
+    label: "Ask the supervisor",
+    description:
+      "Ask whoever runs this factory task a question you cannot answer from the request or the code (a decision, missing information). Your turn ends with the call; the answer arrives as the next message and you continue the same round. Ask only when guessing would risk wrong work.",
+    promptSnippet: "Ask the task's supervisor a blocking question; the turn ends and the answer comes as the next message",
+    parameters: {
+      type: "object",
+      required: ["question"],
+      properties: { question: { type: "string", description: "The question, self-contained: the supervisor has not seen your work" } },
+    } as never,
+    async execute(_toolCallId, params: unknown, _signal, _onUpdate, ctx) {
+      const fail = (text: string) => ({ content: [{ type: "text" as const, text: `${ASK_SUPERVISOR_TOOL}: ${text}` }], details: undefined, isError: true });
+      const refusal = gate.refusal();
+      if (refusal !== null) return fail(refusal);
+      const { question } = isRecord(params) ? params : {};
+      if (typeof question !== "string" || question.trim() === "") return fail("question must not be empty");
+      gate.asked(question, ctx);
+      return { content: [{ type: "text" as const, text: "Question recorded. Stop now: the answer arrives as the next message." }], details: { question }, terminate: true };
     },
   });
 }

@@ -123,6 +123,21 @@ export function startRun(deps: OpsDeps, current: Snapshot, trigger: Trigger, { c
   record(deps, "factory-state", { state: "running", round: current.round + 1, reason: opens });
 }
 
+/** The coder's question to the supervisor (`factory_ask_supervisor`): the task rests in `waiting_answer` until the next message. */
+export function askSupervisor(deps: OpsDeps, current: Snapshot, question: string): void {
+  record(deps, "factory-question", { text: question });
+  endState(deps, current, "waiting_answer", "question");
+}
+
+/**
+ * The message that answers the open question: the coder continues the same round. Unlike `startRun` it opens no round
+ * (the run's budget stays spent) and `openRun` does not come first, so the worktree is neither squashed nor rebased.
+ */
+export function resumeAnswered(deps: OpsDeps, current: Snapshot): void {
+  deps.session.runner.reset();
+  record(deps, "factory-state", { state: "running", round: current.round, reason: "answer" });
+}
+
 export function taskFiles(deps: OpsDeps, task: Task): Promise<TaskFiles> {
   const { session, cwd } = deps;
   return (session.files ??= (async () => loadTaskFiles(session.runner.cleanup, cwd, await taskBase(session.runner.cleanup, cwd, task)))());

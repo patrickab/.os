@@ -95,6 +95,8 @@ export interface TaskView {
   reason: string | null;
   /** The timestamp of the last `factory-state` entry. */
   at: string | null;
+  /** The coder's open question (`factory_ask_supervisor`) while the state is `waiting_answer`, else null. */
+  question: string | null;
   running: boolean;
   /** The state is `running` or `merging` but no runner lives (it crashed, or the host rebooted). */
   interrupted: boolean;
@@ -108,7 +110,7 @@ export interface TaskView {
 
 export type TaskActionName = "tasks.approve" | "tasks.retry" | "tasks.cancel" | "tasks.remove" | "tasks.message";
 
-export type TimelineKind = "task" | "round" | "gate" | "review" | "merge" | "state" | "coder" | "user" | "spawn";
+export type TimelineKind = "task" | "round" | "gate" | "review" | "merge" | "state" | "coder" | "user" | "spawn" | "question";
 
 /** `coder`/`user` data is `{text}`; the others carry the `factory-*` entry's data unchanged. */
 export interface TimelineEntry {
@@ -220,7 +222,7 @@ export const ACTIONS = {
     true,
   ),
   "tasks.wait": spec(
-    "Wait until the watched tasks rest (no runner, state waiting_approve, blocked, done or cancelled, or interrupted) or one needs attention (it rests, not done), or the timeout passes. Answers {tasks, attention: ids, timedOut}",
+    "Wait until the watched tasks rest (no runner, state waiting_approve, waiting_answer, blocked, done or cancelled, or interrupted) or one needs attention (it rests, not done), or the timeout passes. Answers {tasks, attention: ids, timedOut}",
     {
       ids: { type: "array", items: { type: "string" }, description: "Watch these tasks (ids or unique prefixes); give ids or tag" },
       tag: { ...TAG_FILTER, description: "Watch the tasks whose tag is this one or lies under it, those started during the wait too; give ids or tag" },
@@ -240,7 +242,7 @@ export const ACTIONS = {
     true,
   ),
   "tasks.message": spec(
-    "Send a task a message: a resting task runs new rounds, a running coder gets it as a follow-up",
+    "Send a task a message: a resting task runs new rounds, a task in waiting_answer gets it as the answer to its question (same round), a running coder gets it as a follow-up",
     { id: ID, text: { type: "string", description: "The message" } },
     ["id", "text"],
     true,
@@ -381,6 +383,7 @@ async function taskView(record: TaskRecord): Promise<TaskView> {
   const entries = sessionPath === null ? [] : parseEntries(await readFile(sessionPath, "utf8"));
   let last: { state: State; round: number; reason: string; at: string } | null = null;
   let settings: Settings | null = null;
+  let question: string | null = null;
   let usage: TaskView["usage"] = null;
   const addUsage = (input: unknown, output: unknown, cost: unknown) => {
     usage ??= { input: 0, output: 0, cost: 0 };
@@ -393,6 +396,8 @@ async function taskView(record: TaskRecord): Promise<TaskView> {
     if (state && typeof state.state === "string" && typeof state.round === "number" && typeof state.reason === "string") {
       last = { state: state.state as State, round: state.round, reason: state.reason, at: typeof entry.timestamp === "string" ? entry.timestamp : "" };
     }
+    const asked = customData(entry, "factory-question");
+    if (asked && typeof asked.text === "string") question = asked.text;
     const task = customData(entry, "factory-task");
     if (task && isRecord(task.settings)) settings = task.settings as unknown as Settings;
     const review = customData(entry, "factory-review");
@@ -420,6 +425,7 @@ async function taskView(record: TaskRecord): Promise<TaskView> {
     round: last?.round ?? null,
     reason: last?.reason ?? null,
     at: last?.at ?? null,
+    question: last?.state === "waiting_answer" ? question : null,
     running,
     interrupted: last !== null && !RESTING_STATES.includes(last.state) && !running,
     settings,
@@ -443,7 +449,7 @@ function taskActions(view: Omit<TaskView, "actions">): TaskActionName[] {
     "tasks.approve": !view.running && !view.interrupted && view.state !== null && APPROVE_STATES.includes(view.state),
     "tasks.retry": !view.running && (view.interrupted || (view.state !== null && RETRY_STATES.includes(view.state))),
     "tasks.cancel": view.state === null || !FINAL_STATES.includes(view.state),
-    "tasks.remove": !isActive(view),
+    "tasks.remove": !isActive(view) && view.state !== "waiting_answer",
     "tasks.message": view.state !== null && view.state !== "merging",
   };
   return (Object.keys(allowed) as TaskActionName[]).filter((name) => allowed[name]);
@@ -583,6 +589,7 @@ const CUSTOM_KINDS: Record<string, TimelineKind | undefined> = {
   "factory-merge": "merge",
   "factory-state": "state",
   "factory-spawn": "spawn",
+  "factory-question": "question",
 };
 
 /** The entries of the session file's complete lines from byte `since` on; `next` is the end of the last one. */
@@ -918,6 +925,7 @@ const HANDLERS: Record<ActionName, (params: Params, context: CallContext) => Pro
     const record = await findTask(params.id);
     const check = async (view: TaskView) => {
       if (isActive(view)) throw new FactoryError("refused", `task ${shortId(record)} is running, cancel it first`);
+      if (view.state === "waiting_answer") throw new FactoryError("refused", `task ${shortId(record)} waits for the answer to its question, answer it with tasks.message or cancel it first`);
     };
     return withTaskLock(record, check, async () => {
       const target = await taskMainBranch(record.sessionDir, record.sessionId);

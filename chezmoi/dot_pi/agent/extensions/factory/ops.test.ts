@@ -10,11 +10,13 @@ import { join } from "node:path";
 import { loadTaskFiles } from "./config.ts";
 import {
   approveTask,
+  askSupervisor,
   cancelTask,
   initConfig,
   newTaskSession,
   pipelineSteps,
   record,
+  resumeAnswered,
   resumeTask,
   retryTask,
   startTask,
@@ -236,6 +238,23 @@ describe("retryTask", () => {
     expect(pi.entries.at(-2)).toEqual({ customType: "factory-round", data: { round: 2, trigger: "retry" } });
     expect(pi.states().at(-1)).toBe("running/retry");
     expect(pi.userMessages.at(-1)).toBe(RETRY_PROMPT);
+  });
+});
+
+describe("askSupervisor and resumeAnswered", () => {
+  test("a question rests the task in waiting_answer; the answer runs the same round without a round entry", () => {
+    const pi = fake(dir);
+    pi.holdTask("running");
+    record(pi.deps, "factory-round", { round: 1, trigger: "start" });
+    askSupervisor(pi.deps, pi.deps.session.snapshot!, "Which table?");
+    expect(pi.entries.slice(3)).toEqual([
+      { customType: "factory-question", data: { text: "Which table?" } },
+      { customType: "factory-state", data: { state: "waiting_answer", round: 1, reason: "question" } },
+    ]);
+    expect(pi.deps.session.snapshot).toMatchObject({ state: "waiting_answer", question: "Which table?" });
+    resumeAnswered(pi.deps, pi.deps.session.snapshot!);
+    expect(pi.entries.slice(5)).toEqual([{ customType: "factory-state", data: { state: "running", round: 1, reason: "answer" } }]);
+    expect(pi.deps.session.snapshot).toMatchObject({ state: "running", round: 1, runFirstRound: 1 });
   });
 });
 

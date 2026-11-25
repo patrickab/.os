@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyEntry, approvedFrom, followUpMessages, gateData, mergeFailedPrompt, parseStartPayload, rebuild, RETRY_PROMPT, roundsUsed, wasInterrupted, type Finding, type Settings, type Task } from "./state.ts";
+import { applyEntry, approvedFrom, followUpMessages, gateData, mergeFailedPrompt, parseStartPayload, rebuild, RESTING_STATES, RETRY_PROMPT, roundsUsed, wasInterrupted, type Finding, type Settings, type Task } from "./state.ts";
 
 const task: Task = {
   title: "Add notes",
@@ -61,7 +61,23 @@ describe("rebuild", () => {
     const base = rebuild([custom("factory-task", task)])!;
     expect(wasInterrupted(base)).toBe(true);
     expect(wasInterrupted({ ...base, state: "merging" })).toBe(true);
-    for (const state of ["waiting_approve", "blocked", "done", "cancelled"] as const) expect(wasInterrupted({ ...base, state })).toBe(false);
+    for (const state of ["waiting_approve", "waiting_answer", "blocked", "done", "cancelled"] as const) expect(wasInterrupted({ ...base, state })).toBe(false);
+  });
+
+  test("a factory-question and waiting_answer rebuild into the resting state with the open question; the answer clears it", () => {
+    const entries = [
+      custom("factory-task", task),
+      custom("factory-round", { round: 1, trigger: "start" }),
+      custom("factory-state", { state: "running", round: 1, reason: "start" }),
+      custom("factory-question", { text: "Which table?" }),
+      custom("factory-state", { state: "waiting_answer", round: 1, reason: "question" }),
+    ];
+    const asked = rebuild(entries);
+    expect(asked).toMatchObject({ state: "waiting_answer", round: 1, runFirstRound: 1, reason: "question", question: "Which table?" });
+    expect(RESTING_STATES).toContain("waiting_answer");
+    const answered = rebuild([...entries, custom("factory-state", { state: "running", round: 1, reason: "answer" })]);
+    expect(answered).toMatchObject({ state: "running", round: 1, runFirstRound: 1 });
+    expect(answered?.question).toBeUndefined();
   });
 });
 

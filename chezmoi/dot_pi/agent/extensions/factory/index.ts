@@ -25,7 +25,8 @@
  *   or message tries again
  * - Every step is a `custom` session entry (`state.ts`). The task is rebuilt from them on `session_start`, where a
  *   merge that landed while the session went down is recorded from its `factory-merge-intent`
- * - A plain message to a waiting, blocked, cancelled or done task starts new rounds
+ * - A plain message to a waiting, blocked, cancelled or done task starts new rounds; to a task in `waiting_answer` (the
+ *   coder called `factory_ask_supervisor`) it is the answer, and the coder continues the same round
  * - Loaded into every coding session: without a `factory-task` entry no handler does anything
  * - Registers the `factory` tool (`tool.ts`), which starts and drives tasks like this one from any session
  * - A passed round of a task whose title is not a conventional commit title asks the coder for the commit message
@@ -36,12 +37,13 @@
  *   task's target branch and merge mode
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { followUpPrompt, registerNewTaskTool } from "./followup.ts";
+import { followUpPrompt, registerAskSupervisorTool, registerNewTaskTool } from "./followup.ts";
 import { snapshotTree } from "./git.ts";
 import { modelsCommand } from "./models.ts";
 import { commitAnswerDrafts, messageRoundDrafts, runRound, type RoundResult } from "./pipeline.ts";
 import {
   approveTask,
+  askSupervisor,
   cancelTask,
   conflictMessage,
   endState,
@@ -50,6 +52,7 @@ import {
   newTaskSession,
   openRun,
   pipelineSteps,
+  resumeAnswered,
   resumeTask,
   retryTask,
   startRun,
@@ -92,11 +95,11 @@ export default function (pi: ExtensionAPI) {
   let opened: RunOpening | undefined;
   /** The commit message ask of a passed round awaiting the coder's answer: the state it passed into, the tree that passed. */
   let commitAsk: { passedInto: State; tree: string } | undefined;
-  let newTaskTool = false;
-  /** `factory_new_task` exists in task sessions only: registered once the session holds a task. */
+  let taskTools = false;
+  /** `factory_new_task` and `factory_ask_supervisor` exist in task sessions only: registered once the session holds a task. */
   const registerTaskTools = () => {
-    if (newTaskTool || !session.snapshot) return;
-    newTaskTool = true;
+    if (taskTools || !session.snapshot) return;
+    taskTools = true;
     registerNewTaskTool(pi, {
       refusal: () => {
         const current = session.snapshot;
@@ -113,6 +116,12 @@ export default function (pi: ExtensionAPI) {
         if (session.followUp) session.followUp.spawnedForMessage = true;
         pi.appendEntry("factory-spawn", spawn);
         session.snapshot = applyEntry(session.snapshot, "factory-spawn", spawn);
+      },
+    });
+    registerAskSupervisorTool(pi, {
+      refusal: () => (session.snapshot?.state === "running" ? null : "only the coder of a running task may ask"),
+      asked: (question, ctx) => {
+        if (session.snapshot) askSupervisor(deps(ctx), session.snapshot, question);
       },
     });
   };
@@ -194,6 +203,12 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify("factory: a merge is running, send the message when it has ended", "warning");
       return { action: "handled" };
     }
+    // The answer to the coder's question continues its round: no rebase, so the worktree stays as the coder left it.
+    if (atRest.state === "waiting_answer") {
+      // A merged task runs again only in a follow-up run, whose session state a new runner has to restore.
+      session.followUp = atRest.mergedCommit === null ? undefined : { merged: atRest.mergedCommit, spawnedForMessage: false };
+      return;
+    }
     if (!RESTING_STATES.includes(atRest.state)) return;
     const ops = deps(ctx);
     try {
@@ -218,7 +233,9 @@ export default function (pi: ExtensionAPI) {
     const opening = opened ?? {};
     opened = undefined;
     const ops = deps(ctx);
-    const opens = event.messageType === "user" && RESTING_STATES.includes(atRest.state);
+    const answers = event.messageType === "user" && atRest.state === "waiting_answer";
+    const opens = event.messageType === "user" && !answers && RESTING_STATES.includes(atRest.state);
+    if (answers) resumeAnswered(ops, atRest);
     if (opens) startRun(ops, atRest, "message", opening);
     // A `factory.yaml` that does not parse is reported by the round, not here.
     const taskFilesNow = await taskFiles(ops, atRest.task).catch(() => undefined);

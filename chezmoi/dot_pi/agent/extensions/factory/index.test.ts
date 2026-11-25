@@ -64,11 +64,15 @@ function session(cwd: string, branch: Entry[] = []) {
   const statuses: [string, string | undefined][] = [];
   const flags = { idle: true, pending: false, aborts: 0 };
   const tools: string[] = [];
+  const toolDefs = new Map<string, { execute: (...args: unknown[]) => Promise<any> }>();
   const pi = {
     registerCommand: (_name: string, options: { handler: typeof commandHandler }) => {
       commandHandler = options.handler;
     },
-    registerTool: (tool: { name: string }) => tools.push(tool.name),
+    registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<any> }) => {
+      tools.push(tool.name);
+      toolDefs.set(tool.name, tool);
+    },
     on: (name: string, handler: (event: any, ctx: any) => unknown) => handlers.set(name, handler),
     appendEntry: (customType: string, data: unknown) => entries.push({ customType, data }),
     sendUserMessage: (text: string) => messages.push(text),
@@ -104,6 +108,8 @@ function session(cwd: string, branch: Entry[] = []) {
     emit,
     states,
     command: (args: string) => commandHandler(args, ctx),
+    /** A coder's tool call, as Pi runs it in this session. */
+    tool: (name: string, params: unknown) => toolDefs.get(name)!.execute("call", params, undefined, undefined, ctx),
     of: (customType: string) => entries.filter((entry) => entry.customType === customType).map((entry) => entry.data),
     start: (settings: Partial<Settings> = {}) =>
       commandHandler(`start ${JSON.stringify({ request: "Add task.txt", title: "feat: add task file", settings: { branch: "main", merge: "auto", maxRounds: 3, review: false, models: {}, ...settings } })}`, ctx),
@@ -569,5 +575,51 @@ describe("review 2: merge, resume and runs at rest", () => {
     await pi.command("retry");
     expect(await pi.boundary()).toBe(true);
     expect(pi.of("factory-gate").at(-1)).toMatchObject({ argv: ["test", "-f", "extra.txt"], exitCode: 1 });
+  });
+});
+
+describe("factory_ask_supervisor", () => {
+  test("the question ends the turn without the round's steps; the next runner's session takes the answer in the same round, without a rebase", async () => {
+    const worktree = addTaskWorktree();
+    const pi = session(worktree);
+    await pi.start();
+    expect(pi.tools).toEqual(["factory", "factory_new_task", "factory_ask_supervisor"]);
+    // A failing gate: had the round's steps run, a gates round would open.
+    rmSync(join(worktree, "required.txt"));
+    expect(await pi.tool("factory_ask_supervisor", { question: "May required.txt go?" })).toMatchObject({ terminate: true });
+    expect(await pi.boundary()).toBe(false);
+    await pi.settled();
+    expect(pi.states()).toEqual(["running/start", "waiting_answer/question"]);
+    expect(pi.of("factory-gate")).toEqual([]);
+
+    const next = session(worktree, [...pi.entries]);
+    await next.emit("session_start");
+    const head = gitIn(worktree, "rev-parse", "HEAD");
+    writeFileSync(join(worktree, "task.txt"), "task\n");
+    expect(await next.emit("input", { text: "No, keep it" })).toBeUndefined();
+    await next.emit("before_agent_start", { messageType: "user", systemPromptOptions: { sections: {} } });
+    expect(next.states()).toEqual(["running/start", "waiting_answer/question", "running/answer"]);
+    expect(next.of("factory-round")).toEqual([{ round: 1, trigger: "start" }]);
+    expect(next.of("factory-state").at(-1)).toEqual({ state: "running", round: 1, reason: "answer" });
+    // `openRun` would have committed the worktree and rebased it.
+    expect(gitIn(worktree, "rev-parse", "HEAD")).toBe(head);
+    expect(gitIn(worktree, "status", "--porcelain").split("\n").map((line) => line.trim()).sort()).toEqual(["?? task.txt", "D required.txt"]);
+
+    // The coder's turn ends: the round's gates run, still round 1.
+    writeFileSync(join(worktree, "required.txt"), "required\n");
+    expect(await next.boundary()).toBe(false);
+    expect(next.of("factory-gate").at(-1)).toMatchObject({ round: 1, exitCode: 0 });
+    expect(next.of("factory-round")).toEqual([{ round: 1, trigger: "start" }]);
+  });
+
+  test("a plain message to a task resting in another state still opens a new round", async () => {
+    const pi = session(addTaskWorktree());
+    await pi.start();
+    await pi.settled(true);
+    expect(pi.states().at(-1)).toBe("blocked/stopped");
+    expect(await pi.emit("input", { text: "go on" })).toBeUndefined();
+    await pi.emit("before_agent_start", { messageType: "user", systemPromptOptions: { sections: {} } });
+    expect(pi.of("factory-round").at(-1)).toEqual({ round: 2, trigger: "message" });
+    expect(pi.states().at(-1)).toBe("running/message");
   });
 });

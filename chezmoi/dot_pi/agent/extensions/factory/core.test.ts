@@ -473,6 +473,7 @@ describe("task reads", () => {
       round: 1,
       reason: "gates",
       at: "t10",
+      question: null,
       running: false,
       interrupted: false,
       settings: { branch: "main", merge: "auto", maxRounds: 2, review: true, models: {} },
@@ -930,5 +931,28 @@ describe("tasks.wait", () => {
     await expectError(wait({ ids: [ID_1], timeoutMs: 999 }), "invalid", "timeoutMs must be at least 1000");
     await expectError(wait({ ids: [ID_1], timeoutMs: 3_600_001 }), "invalid", "timeoutMs must be at most 3600000");
     expect(ACTIONS["tasks.wait"].mutates).toBe(false);
+  });
+});
+
+describe("waiting_answer", () => {
+  test("TaskView: the open question, actions message and cancel; timeline kind question; remove refused; tasks.wait needs attention", async () => {
+    const record = fakeRecord(ID_1, "/r");
+    await writeTask(record);
+    const asked = [
+      { type: "custom", customType: "factory-round", timestamp: "t1", data: { round: 1, trigger: "start" } },
+      { type: "custom", customType: "factory-question", timestamp: "t2", data: { text: "Which table?" } },
+      { type: "custom", customType: "factory-state", timestamp: "t3", data: { state: "waiting_answer", round: 1, reason: "question" } },
+    ];
+    const path = writeSession(record, asked);
+    const view = (await callAction("tasks.get", { id: ID_1 })) as TaskView;
+    expect([view.state, view.question, view.running, view.interrupted, view.actions]).toEqual(["waiting_answer", "Which table?", false, false, ["tasks.cancel", "tasks.message"]]);
+    const timeline = (await callAction("tasks.timeline", { id: ID_1 })) as { entries: TimelineEntry[] };
+    expect(timeline.entries[1]).toEqual({ at: "t2", kind: "question", data: { text: "Which table?" } });
+    await expectError(callAction("tasks.remove", { id: ID_1, force: true }), "refused", "waits for the answer to its question");
+    expect(await callAction("tasks.wait", { ids: [ID_1] })).toMatchObject({ attention: [ID_1], timedOut: false });
+
+    appendFileSync(path, `${JSON.stringify({ type: "custom", customType: "factory-state", timestamp: "t4", data: { state: "blocked", round: 1, reason: "gates" } })}\n`);
+    const answered = (await callAction("tasks.get", { id: ID_1 })) as TaskView;
+    expect([answered.state, answered.question]).toEqual(["blocked", null]);
   });
 });
