@@ -1,26 +1,33 @@
 #!/usr/bin/env bash
-# Record a meeting with voxtype, transcript separated by speaker
-# Usage: record.sh <name>  ->  ~/git/voxtype_meeting/<name>/<yyyy-mm-dd>.md
+# Record a meeting (mic + system audio), transcript with speaker turns from WhisperX on the GPU box
+# Usage: record.sh <name>  ->  ~/git/voxtype_meeting/<name>/<yyyy-mm-dd>.{md,flac}
+# GPU side is set up by scripts/setup-whisperx.sh, runs offline
 set -euo pipefail
 
+GPU_HOST=gigachad-backend
+
 dir=~/git/voxtype_meeting/$1
-out=$dir/$(date +%F).md
+base=$dir/$(date +%F)
 mkdir -p "$dir"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
 
-# `|| true`: show fails while no meeting exists yet, set -e would exit silently
-latest_id() { voxtype meeting show latest 2>/dev/null | awk '/^ID:/{print $2}' || true; }
-meeting_status() { voxtype meeting show "$1" 2>/dev/null | awk '/^Status:/{print $2}' || true; }
-
-prev=$(latest_id)
-voxtype meeting start -t "$1" >/dev/null
-echo "Starting..."
-# The daemon may load or download models first, wait until the new meeting exists
-until id=$(latest_id) && [[ -n $id && $id != "$prev" ]]; do sleep 1; done
+pw-record --rate 16000 --channels 1 "$tmp/mic.wav" &
+mic=$!
+pw-record --rate 16000 --channels 1 --target "$(pactl get-default-sink)" -P '{ stream.capture.sink = true }' "$tmp/sys.wav" &
+sys=$!
 
 read -rp "Recording '$1', press Enter to stop "
-voxtype meeting stop >/dev/null
-echo "Transcribing last chunk..."
-until [[ $(meeting_status "$id") == Completed ]]; do sleep 1; done
+kill -INT "$mic" "$sys"
+wait
 
-voxtype meeting export "$id" --speakers --timestamps -o "$out" >/dev/null
-echo "Transcript: $out"
+# Keep the audio next to the transcript, to rerun transcription if needed
+ffmpeg -loglevel error -y -i "$tmp/mic.wav" -i "$tmp/sys.wav" -filter_complex amix=inputs=2:duration=longest "$base.flac"
+
+echo "Transcribing on $GPU_HOST..."
+# Only the progress lines of transcribe.py, not library logs
+ssh -o ClearAllForwardings=yes "$GPU_HOST" \
+    "f=\$(mktemp --suffix .flac) && cat >\$f && cd ~/whisperx && HF_HUB_OFFLINE=1 .venv/bin/python transcribe.py \$f $(printf %q "$1"); rc=\$?; rm -f \$f; exit \$rc" \
+    <"$base.flac" >"$base.md" 2> >(grep -E '^(transcribing|aligning|separating|Traceback|[A-Za-z]*Error)' >&2)
+
+echo "Transcript: $base.md"

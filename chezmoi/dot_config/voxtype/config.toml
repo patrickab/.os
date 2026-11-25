@@ -98,14 +98,3 @@ on_transcription = false
 #
 # Custom word replacements (case-insensitive)
 # replacements = { "hyperwhisper" = "hyprwhspr" }
-
-# Meeting transcription, driven by ~/.os/scripts/record.sh
-# ml diarization needs the ONNX binary, setup-voxtype.sh switches to it
-[meeting]
-enabled = true
-# Remote whisper returns plain text, so speakers can only change between chunks
-# Short chunks give finer speaker turns at a small accuracy cost at chunk edges
-chunk_duration_secs = 8
-
-[meeting.diarization]
-backend = "ml"
