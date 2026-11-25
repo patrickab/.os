@@ -639,7 +639,42 @@ async function tasksIn(repo: string | undefined, tag: string | undefined): Promi
 
 const WAIT_POLL_MS = 500;
 
-/** `tasks.wait`: polls the watched tasks until all rest, one needs attention, the deadline passes or none is watched. */
+/** The last `factory-state` of each watched session file, by task id, with the file's size and mtime it was read at. */
+type WaitStates = Map<string, { size: number; mtimeMs: number; state: State | null }>;
+
+/** The task's last state, the session file read again only when its size or mtime changed since the last poll. */
+async function polledState(record: TaskRecord, cache: WaitStates): Promise<State | null> {
+  const path = await sessionFilePath(record.sessionDir, record.sessionId);
+  if (path === undefined) return null;
+  const { size, mtimeMs } = await stat(path);
+  const cached = cache.get(record.id);
+  if (cached?.size === size && cached.mtimeMs === mtimeMs) return cached.state;
+  const state = ((await readFactoryStates(record.sessionDir, record.sessionId)).last?.state as State | undefined) ?? null;
+  cache.set(record.id, { size, mtimeMs, state });
+  return state;
+}
+
+/**
+ * Whether the watched tasks may end the wait (`rests`, `needsAttention`), from their states and only the runner
+ * lookups that can change the answer: a task without a state never rests, and `done` ones matter only once every
+ * other task rests.
+ */
+async function waitMayEnd(records: TaskRecord[], states: (State | null)[]): Promise<boolean> {
+  const runs = async (record: TaskRecord) => (await liveRunners(record)).length > 0;
+  for (const [index, record] of records.entries()) {
+    const state = states[index];
+    if (state !== null && state !== "done" && !(await runs(record))) return true;
+  }
+  if (states.some((state) => state !== "done")) return false;
+  for (const record of records) if (await runs(record)) return false;
+  return true;
+}
+
+/**
+ * `tasks.wait`: polls the watched tasks until all rest, one needs attention, the deadline passes or none is watched. A
+ * poll reads only what changed in the session files and looks for runners only where that decides; full TaskViews are
+ * built only for an answer.
+ */
 async function waitForTasks(
   watched: () => Promise<TaskRecord[]>,
   ignore: string[],
@@ -648,12 +683,18 @@ async function waitForTasks(
 ): Promise<{ tasks: TaskView[]; attention: string[]; timedOut: boolean }> {
   const deadline = Date.now() + timeoutMs;
   const ignored = (record: TaskRecord) => ignore.some((prefix) => record.id.startsWith(prefix));
+  const cache: WaitStates = new Map();
   while (true) {
     if (signal?.aborted) throw new FactoryError("failed", "tasks.wait was aborted");
-    const tasks = await Promise.all((await watched()).filter((record) => !ignored(record)).map(taskView));
-    const attention = tasks.filter(needsAttention).map((view) => view.id);
-    if (tasks.every(rests) || attention.length > 0) return { tasks, attention, timedOut: false };
-    if (Date.now() >= deadline) return { tasks, attention, timedOut: true };
+    const records = (await watched()).filter((record) => !ignored(record));
+    const timedOut = Date.now() >= deadline;
+    if (timedOut || (await waitMayEnd(records, await Promise.all(records.map((record) => polledState(record, cache)))))) {
+      const tasks = await Promise.all(records.map(taskView));
+      const attention = tasks.filter(needsAttention).map((view) => view.id);
+      // The views are read after the poll: a task that moved on in between is polled again.
+      if (tasks.every(rests) || attention.length > 0) return { tasks, attention, timedOut: false };
+      if (timedOut) return { tasks, attention, timedOut: true };
+    }
     await abortableSleep(Math.min(WAIT_POLL_MS, deadline - Date.now()), signal);
   }
 }

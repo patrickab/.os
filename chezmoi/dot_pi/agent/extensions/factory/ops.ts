@@ -16,7 +16,7 @@ import { abortLeftoverRebase, git, LOCKFILES, nulList, primaryCheckout, rebaseIn
 import { mergeTask, rebaseWorktree } from "./merge.ts";
 import { runMerge, runMergeRequest, type MergeRequestSteps, type PipelineSteps } from "./pipeline.ts";
 import { runReview } from "./review.ts";
-import { CommandRunner } from "./run.ts";
+import { CommandRunner, type Exec } from "./run.ts";
 import {
   applyEntry,
   conflictFeedback,
@@ -87,6 +87,8 @@ export interface OpsDeps {
    * once it holds a message, and a merge request never sends one.
    */
   recordRequest(text: string): void;
+  /** False when this Pi offers no way to `recordRequest`: a merge request's start must fail before it records anything. */
+  canRecordRequest(): boolean;
   sendMessage(message: CoderMessage, options: { triggerTurn: boolean }): void;
   setStatus(key: string, text: string | undefined): void;
   isIdle(): boolean;
@@ -147,9 +149,18 @@ export function resumeAnswered(deps: OpsDeps, current: Snapshot): void {
   record(deps, "factory-state", { state: "running", round: current.round, reason: "answer" });
 }
 
+function targetTip(exec: Exec, cwd: string, mainBranch: string): Promise<string> {
+  return git(exec, cwd, ["rev-parse", `refs/heads/${mainBranch}`]);
+}
+
+/**
+ * The rules of the current run, read once per run: from the task's base, a merge request's from its target's tip. A
+ * merge request's base is where its source forked, which can be old: a retry is held to the gates the target has now.
+ */
 export function taskFiles(deps: OpsDeps, task: Task): Promise<TaskFiles> {
   const { session, cwd } = deps;
-  return (session.files ??= (async () => loadTaskFiles(session.runner.cleanup, cwd, await taskBase(session.runner.cleanup, cwd, task)))());
+  const exec = session.runner.cleanup;
+  return (session.files ??= (async () => loadTaskFiles(exec, cwd, isMergeRequest(task) ? await targetTip(exec, cwd, task.mainBranch) : await taskBase(exec, cwd, task)))());
 }
 
 /**
@@ -213,16 +224,13 @@ export function pipelineSteps(deps: OpsDeps, task: Task, taskFilesNow: TaskFiles
   };
 }
 
-/** `pipelineSteps` and the unsquashed rebase of a merge request, after a rebase a killed run left behind is aborted. */
+/** `pipelineSteps`, the worktree's uncommitted changes and the unsquashed rebase of a merge request. */
 function mergeRequestSteps(deps: OpsDeps, task: Task, taskFilesNow: TaskFiles): MergeRequestSteps {
   const { runner } = deps.session;
   return {
     ...pipelineSteps(deps, task, taskFilesNow, true),
-    rebase: async () => {
-      // A merge request has no coder whose resolution a rebase in progress could hold: it is a dead run's.
-      await abortLeftoverRebase(runner.cleanup, deps.cwd);
-      return rebaseWorktree(runner.run, runner.cleanup, deps.cwd, task, taskFilesNow.config.protected);
-    },
+    dirty: async () => (await git(runner.run, deps.cwd, ["status", "--porcelain"])) !== "",
+    rebase: () => rebaseWorktree(runner.run, runner.cleanup, deps.cwd, task, taskFilesNow.config.protected),
   };
 }
 
@@ -234,6 +242,9 @@ async function finishMergeRequest(deps: OpsDeps, current: Snapshot): Promise<voi
   const { session } = deps;
   let drafts: Draft[];
   try {
+    // A merge request has no coder whose resolution a rebase in progress could hold: it is a dead run's, or a person's
+    // the retry discards (README). Before the dirty check, which its conflicted files would fail.
+    await abortLeftoverRebase(session.runner.cleanup, deps.cwd);
     drafts = await runMergeRequest(current, mergeRequestSteps(deps, current.task, await taskFiles(deps, current.task)));
   } catch (error) {
     drafts = [session.runner.cancelled ? stateDraft("cancelled", current.round, "cancelled") : stateDraft("blocked", current.round, `pipeline_error: ${errorText(error)}`)];
@@ -322,10 +333,11 @@ export function startTask(deps: OpsDeps, json: string): Promise<OpResult> {
     try {
       session.runner.reset();
       const payload = parseStartPayload(json);
-      const taskGitFacts = await taskGit(session.runner.run, deps.cwd, payload.settings.branch);
       const kind = payload.kind ?? "task";
+      if (kind === "merge_request" && !deps.canRecordRequest()) return { ok: false, error: "this Pi cannot record a message without a turn, which a merge request needs" };
+      const taskGitFacts = await taskGit(session.runner.run, deps.cwd, payload.settings.branch);
       // A merge request's HEAD is its source branch, whose rules are what it is reviewed for: they come from the target.
-      const rulesCommit = kind === "merge_request" ? await git(session.runner.run, deps.cwd, ["rev-parse", `refs/heads/${taskGitFacts.mainBranch}`]) : taskGitFacts.baseSha;
+      const rulesCommit = kind === "merge_request" ? await targetTip(session.runner.run, deps.cwd, taskGitFacts.mainBranch) : taskGitFacts.baseSha;
       const loaded = await loadTaskFiles(session.runner.run, deps.cwd, rulesCommit);
       const coder = payload.settings.models.coder;
       if (kind === "task" && coder && !(await deps.setModel(coder))) return { ok: false, error: `model ${coder} is not available` };

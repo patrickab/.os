@@ -923,6 +923,39 @@ describe("tasks.wait", () => {
     await expectError(callAction("tasks.wait", { ids: [ID_1] }, { signal: controller.signal }), "failed", "tasks.wait was aborted");
   });
 
+  test("an interrupted task (a running state, no runner) rests and needs attention (m7)", async () => {
+    await waitTask(ID_1, "w", "running");
+    const result = await wait({ ids: [ID_1], timeoutMs: 5_000 });
+    expect([result.attention, result.timedOut, result.tasks[0].interrupted]).toEqual([[ID_1], false, true]);
+  });
+
+  test("a resting state with a live runner does not rest until the runner ends (m7)", async () => {
+    const record = await waitTask(ID_1, "w", "blocked");
+    const runner = Bun.spawn(["bun", exitingRunner, record.worktree, record.sessionDir, record.sessionId, "x"], { env: { ...process.env, FAKE_INBOX: taskInboxPath(record.id) } });
+    await until(async () => (await liveRunners(record)).length === 1);
+    const timedOut = await wait({ ids: [ID_1], timeoutMs: 1_000 });
+    expect([timedOut.attention, timedOut.timedOut, timedOut.tasks[0].running]).toEqual([[], true, true]);
+    setTimeout(() => writeFileSync(taskInboxPath(record.id), ""), 300);
+    const ended = await wait({ ids: [ID_1], timeoutMs: 10_000 });
+    expect([ended.attention, ended.timedOut]).toEqual([[ID_1], false]);
+    await runner.exited;
+  }, 30_000);
+
+  test("a poll looks for no runner while that cannot end the wait: only the answer's views do (m5)", async () => {
+    const pgrepLog = join(caseDir, "pgrep.log");
+    const wrapperBin = join(caseDir, "pgrep-bin");
+    mkdirSync(wrapperBin);
+    const realPgrep = execFileSync("sh", ["-c", "command -v pgrep"], { encoding: "utf8" }).trim();
+    writeFileSync(join(wrapperBin, "pgrep"), `#!/bin/sh\necho x >> "${pgrepLog}"\nexec "${realPgrep}" "$@"\n`, { mode: 0o755 });
+    process.env.PATH = `${wrapperBin}:${process.env.PATH}`;
+    await waitTask(ID_1, "w");
+    await waitTask(ID_2, "w", "done");
+    const result = await wait({ tag: "w", timeoutMs: 1_500 });
+    expect(result.timedOut).toBe(true);
+    // One lookup per task for the answer's TaskViews; the polls before it (a starting task, a done one) need none.
+    expect(readFileSync(pgrepLog, "utf8").trim().split("\n")).toHaveLength(2);
+  });
+
   test("invalid: ids and tag both or neither, empty ids, a timeout out of bounds", async () => {
     await waitTask(ID_1, "w", "done");
     await expectError(wait({}), "invalid", "tasks.wait needs exactly one of ids and tag");
@@ -1005,5 +1038,20 @@ describe("merge requests", () => {
     expect(existsSync(record.worktree)).toBe(false);
     expect(git(repo, "rev-parse", "wave")).toBe(wave);
     expect(await listTasks()).toEqual([]);
+  });
+
+  test("a forced remove in the middle of a rebase in its worktree keeps the source branch where it was (m7)", async () => {
+    const repo = waveRepo();
+    const wave = git(repo, "rev-parse", "wave");
+    const record = await recordOf((await mergeRequest(repo)) as TaskView);
+    await until(async () => (await stateOf(record)) === "waiting_approve");
+    await until(() => runnerEnded(record));
+    writeFileSync(join(repo, "w.txt"), "main\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "--quiet", "-m", "main w");
+    expect(() => git(record.worktree, "rebase", "main")).toThrow();
+    expect(await callAction("tasks.remove", { id: record.id, force: true })).toMatchObject({ removed: record.id });
+    expect(existsSync(record.worktree)).toBe(false);
+    expect(git(repo, "rev-parse", "refs/heads/wave")).toBe(wave);
   });
 });

@@ -12,7 +12,8 @@
  *   so the coder fixes the change on top of the target branch
  * - Provides `rebaseWorktree`, which a run that opens uses to bring the task branch up to date the same way. It
  *   squashes the task branch onto its base first (`taskBase`): the rebase replays one commit, the task's net change.
- *   A merge request's branch is never squashed: the rebase replays its commits and the target gets every one of them
+ *   A merge request's branch is never committed to nor squashed: the rebase replays its commits and the target gets
+ *   every one of them and nothing else
  * - The factory's own commits run no commit hooks and are not signed (`--no-verify --no-gpg-sign`)
  * - Reports the step that cannot be undone (`intent`) right before it, so a resume can tell whether it happened
  * - Provides `mergeTask`: the `MergeResult` and the `factory-gate` data of the commands it ran. It never throws, a
@@ -91,14 +92,16 @@ export interface MergeOutcome {
 }
 
 /**
- * Brings the task branch up to date: commits the worktree as `commitWorktree` does, squashes the branch onto its base
- * (not a merge request's), then rebases it onto the target branch. A conflicting rebase is aborted with `cleanup` and its conflicting files
+ * Brings the task branch up to date: commits the worktree as `commitWorktree` does and squashes the branch onto its
+ * base (neither for a merge request), then rebases it onto the target branch. A conflicting rebase is aborted with `cleanup` and its conflicting files
  * returned, else null. Any other failure throws. `--autostash` carries what the commit leaves out (protected paths)
  * over the rebase.
  */
 export async function rebaseWorktree(exec: Exec, cleanup: Exec, root: string, task: Task, protectedGlobs: string[], message = task.title): Promise<string[] | null> {
-  await commitWorktree(exec, root, message, protectedGlobs);
-  if (!isMergeRequest(task)) await squashOntoBase(exec, root, task, message);
+  if (!isMergeRequest(task)) {
+    await commitWorktree(exec, root, message, protectedGlobs);
+    await squashOntoBase(exec, root, task, message);
+  }
   const rebase = await exec(["git", "rebase", "--autostash", `refs/heads/${task.mainBranch}`], { cwd: root });
   if (passed(rebase)) {
     // An autostash that did not apply cleanly leaves conflict markers, which the next commit would take.
@@ -161,8 +164,11 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
   // A rebase in progress may hold the coder's resolution: it fails the merge here, it is never aborted.
   await assertCheckoutReady(exec, root, task.branch);
 
-  status("commit");
-  await commitWorktree(exec, root, text, config.protected);
+  // A merge request merges its source's commits and nothing else: what lies uncommitted stays so.
+  if (!isMergeRequest(task)) {
+    status("commit");
+    await commitWorktree(exec, root, text, config.protected);
+  }
   let ontoBefore = await taskBase(exec, root, task);
   const sameGates = JSON.stringify(config.merge_gates) === JSON.stringify(config.gates);
 

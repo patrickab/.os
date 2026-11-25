@@ -328,9 +328,10 @@ describe("runMergeRequest", () => {
     const snapshot = snapshotOf(settings);
     return { ...snapshot, task: { ...snapshot.task, branch: "wave", kind: "merge_request", source: "wave" } };
   };
-  const steps = (overrides: Partial<PipelineSteps> = {}, conflicts: string[] | null = null) => {
+  const steps = (overrides: Partial<PipelineSteps> = {}, conflicts: string[] | null = null, dirty = false) => {
     const base = fakeSteps(overrides);
     return Object.assign(base, {
+      dirty: async () => dirty,
       rebase: async () => {
         base.calls.push("rebase");
         return conflicts;
@@ -355,6 +356,12 @@ describe("runMergeRequest", () => {
     expect([conflict, gates, infra, rejected].map(states)).toEqual([["blocked/conflict"], ["blocked/gates"], ["blocked/gates"], ["blocked/review_rejected"]]);
     expect([conflict, gates, infra, rejected].flatMap(kinds).filter((kind) => kind === "factory-round" || kind === "custom_message")).toEqual([]);
     expect(kinds(rejected)).toEqual(["factory-gate", "factory-gate", "factory-review", "factory-state"]);
+  });
+
+  test("uncommitted changes in its worktree block it before the rebase: nothing is committed for it", async () => {
+    const dirty = steps({}, null, true);
+    expect(states(await runMergeRequest(mergeRequestOf(), dirty))).toEqual(["blocked/dirty"]);
+    expect(dirty.calls).toEqual([]);
   });
 
   test("its merge blocks on a conflict or a failed merge gate instead of a coder round", async () => {

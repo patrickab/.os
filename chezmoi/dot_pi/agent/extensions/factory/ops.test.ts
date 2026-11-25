@@ -78,6 +78,7 @@ function fake(cwd: string) {
     appendEntry: (customType, data) => entries.push({ customType, data }),
     sendUserMessage: (text) => userMessages.push(text),
     recordRequest: (text) => requests.push(text),
+    canRecordRequest: () => true,
     sendMessage: (message, { triggerTurn }) => coderMessages.push({ message, triggerTurn }),
     setStatus: () => undefined,
     isIdle: () => flags.idle,

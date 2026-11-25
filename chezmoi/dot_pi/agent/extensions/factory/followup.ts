@@ -87,13 +87,28 @@ export interface AskSupervisorToolGate {
 
 export const ASK_SUPERVISOR_TOOL = "factory_ask_supervisor";
 
-/** Registers `factory_ask_supervisor {question}`: a terminating call, so the turn ends with the question. */
+/** The tool calls of the session's last assistant message: Pi records the message before it runs any of its calls. */
+function lastAssistantToolCalls(ctx: ExtensionContext): number {
+  let calls = 0;
+  for (const entry of ctx.sessionManager.getBranch()) {
+    const { message } = entry as { message?: { role?: unknown; content?: unknown } };
+    if (entry.type !== "message" || message?.role !== "assistant") continue;
+    calls = Array.isArray(message.content) ? message.content.filter((part) => isRecord(part) && part.type === "toolCall").length : 0;
+  }
+  return calls;
+}
+
+/**
+ * Registers `factory_ask_supervisor {question}`: a terminating call, so the turn ends with the question. Pi ends a turn
+ * early only when every call of the batch terminates, and runs a queued message anyway: the call is refused next to
+ * another tool call or while a message is queued, so an accepted question always ends the turn.
+ */
 export function registerAskSupervisorTool(pi: ExtensionAPI, gate: AskSupervisorToolGate): void {
   pi.registerTool({
     name: ASK_SUPERVISOR_TOOL,
     label: "Ask the supervisor",
     description:
-      "Ask whoever runs this factory task a question you cannot answer from the request or the code (a decision, missing information). Your turn ends with the call; the answer arrives as the next message and you continue the same round. Ask only when guessing would risk wrong work.",
+      "Ask whoever runs this factory task a question you cannot answer from the request or the code (a decision, missing information). Call it alone, with no other tool call in the same message. Your turn ends with the call; the answer arrives as the next message and you continue the same round. Ask only when guessing would risk wrong work.",
     promptSnippet: "Ask the task's supervisor a blocking question; the turn ends and the answer comes as the next message",
     parameters: {
       type: "object",
@@ -106,6 +121,8 @@ export function registerAskSupervisorTool(pi: ExtensionAPI, gate: AskSupervisorT
       if (refusal !== null) return fail(refusal);
       const { question } = isRecord(params) ? params : {};
       if (typeof question !== "string" || question.trim() === "") return fail("question must not be empty");
+      if (lastAssistantToolCalls(ctx) > 1) return fail("call it alone, with no other tool call in the same message: the turn could not end with it");
+      if (ctx.hasPendingMessages()) return fail("a message is queued for you: read it first, then ask if the question still stands");
       gate.asked(question, ctx);
       return { content: [{ type: "text" as const, text: "Question recorded. Stop now: the answer arrives as the next message." }], details: { question }, terminate: true };
     },

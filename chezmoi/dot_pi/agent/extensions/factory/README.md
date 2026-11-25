@@ -54,7 +54,8 @@ problems go back to the coder. A passed round merges into the target branch, or 
   ids out; `timeoutMs` 1000..3600000, default 600000. A task rests when no runner lives and its state is
   `waiting_approve`, `waiting_answer`, `blocked`, `done` or `cancelled`, or it is interrupted; it needs attention when
   it rests and is not `done`. Answers `{tasks, attention: ids, timedOut}` once every watched task rests, one needs
-  attention, the timeout passes or no task is watched; an abort fails it
+  attention, the timeout passes or no task is watched; an abort fails it. A poll re-reads a session file only when it
+  changed and looks for runners only where that decides the answer
 - `tasks.import` (`hostOnly`, `{record}`): registers a task record another store kept; an existing id stays. It refuses
   a record unless `repo` is a primary checkout and `worktree` one of its linked worktrees with `branch` checked out
 - A `repo` param is a path inside the repository, relative to the caller's `cwd`, which is also its default; without
@@ -102,7 +103,9 @@ problems go back to the coder. A passed round merges into the target branch, or 
 
 - In a task session the coder may call `factory_ask_supervisor {question}` while its task is `running`: it records a
   `factory-question {text}` entry (timeline kind `question`, `TaskView.question`) and the resting state
-  `waiting_answer`, and ends the coder's turn. The round's hooks, gates and review do not run; the runner ends
+  `waiting_answer`, and ends the coder's turn. The round's hooks, gates and review do not run; the runner ends. It is
+  refused next to another tool call in the same message and while a message is queued for the coder: Pi would carry
+  the turn on past either
 - The next message (`tasks.message`) is the answer: the coder continues the same round, with no new round, no fresh
   round budget and no squash or rebase of the worktree (the state goes back to `running`, reason `answer`). The
   round's steps run when that turn ends, as for any turn. In `waiting_answer` the actions are `tasks.message` and
@@ -118,11 +121,20 @@ problems go back to the coder. A passed round merges into the target branch, or 
   every one of them by fast-forward), the `gates` run (not `after_code`), the reviewer reviews the whole diff against
   the target whatever `review` says, with `request` verbatim in its prompt under its own heading as its instructions.
   Approved: the normal merge queue (`merge_gates`, fast-forward), with `merge: review` after `waiting_approve`
+- Nothing is ever committed for it: uncommitted changes in its worktree (untracked files included, ignored ones not)
+  end it `blocked` `dirty` before the rebase; clean them up or commit them to the source, then retry
 - Nothing opens a round: a rejected review ends `blocked` `review_rejected`, a rebase conflict `blocked` `conflict`,
   failed gates or merge gates `blocked` `gates`; findings and gate output stay in the timeline. `tasks.retry` runs it
-  again from the rebase (a rebase a dead run left in progress is aborted first). `tasks.message` is refused and not
-  among its actions, and `factory_ask_supervisor` is not registered in its session
-- `factory.yaml` and the reviewer prompt come from the target branch, never from the source. The `factory-task` entry
+  again from the rebase. `tasks.message` is refused and not among its actions, and `factory_ask_supervisor` is not
+  registered in its session
+- A run aborts any rebase in progress in its worktree first: a dead run's, but also a person's half-finished
+  resolution of a `conflict`, which a retry discards. Resolve a conflict by rebasing the source branch elsewhere (or
+  finish the rebase with `git rebase --continue` before the retry)
+- A source branch that holds merge commits (say it merged the target in and resolved a conflict there) loses them in
+  the plain rebase, and the conflicts they resolved come back as `blocked` `conflict`: its owner rebases it onto the
+  target first
+- `factory.yaml` and the reviewer prompt come from the target branch's tip when a run starts (the start and every
+  retry), never from the source: a retry is held to the gates the target has gained meanwhile. The `factory-task` entry
   (timeline kind `task`) carries `kind` and `source` (null for a `task`)
 
 ## Commit message

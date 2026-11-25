@@ -66,6 +66,9 @@ function session(cwd: string, branch: { customType: string; data: unknown }[]) {
   const handlers = new Map<string, (event: any, ctx: any) => unknown>();
   const tools = new Map<string, Tool>();
   const entries: { customType: string; data: any }[] = [];
+  /** Message entries after `branch`, as Pi records them before it runs their tool calls. */
+  const messages: { type: "message"; message: unknown }[] = [];
+  const flags = { pending: false };
   const pi = {
     registerCommand: () => undefined,
     registerTool: (tool: Tool) => tools.set(tool.name, tool),
@@ -79,11 +82,11 @@ function session(cwd: string, branch: { customType: string; data: unknown }[]) {
     cwd,
     isIdle: () => true,
     abort: () => undefined,
-    hasPendingMessages: () => false,
+    hasPendingMessages: () => flags.pending,
     ui: { setStatus: () => undefined, notify: () => undefined },
     model: undefined,
     modelRegistry: { find: () => undefined },
-    sessionManager: { getSessionId: () => "tool-session", getBranch: () => branch.map((entry) => ({ type: "custom", ...entry })) },
+    sessionManager: { getSessionId: () => "tool-session", getBranch: () => [...branch.map((entry) => ({ type: "custom", ...entry })), ...messages] },
   };
   factory(pi as unknown as ExtensionAPI);
   const emit = (name: string, event: unknown = {}) => handlers.get(name)?.(event, ctx);
@@ -91,6 +94,8 @@ function session(cwd: string, branch: { customType: string; data: unknown }[]) {
   return {
     tools,
     entries,
+    messages,
+    flags,
     sections,
     emit,
     /** A user message that opens a run, as Pi sends it: `input`, then `before_agent_start`. */
@@ -187,5 +192,25 @@ describe("factory_ask_supervisor", () => {
       { customType: "factory-state", data: { state: "waiting_answer", round: 2, reason: "question" } },
     ]);
     expect((await pi.ask({ question: "And another?" })).isError).toBe(true);
+  });
+
+  test("refused next to another tool call in the same message or while a message is queued: the turn could not end with it (m6)", async () => {
+    const { worktree } = repoWithTask();
+    const pi = session(worktree, [taskEntry(), custom("factory-round", { round: 1, trigger: "start" }), custom("factory-state", { state: "blocked", round: 1, reason: "max_rounds: gates" })]);
+    await pi.emit("session_start");
+    await pi.message();
+    const toolCall = (name: string) => ({ type: "toolCall", id: name, name, arguments: {} });
+    pi.messages.push({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "I ask" }, toolCall(ASK_SUPERVISOR_TOOL), toolCall("read")] } });
+    const parallel = await pi.ask({ question: "Which table?" });
+    expect([parallel.isError, parallel.content[0].text]).toEqual([true, "factory_ask_supervisor: call it alone, with no other tool call in the same message: the turn could not end with it"]);
+
+    pi.messages.push({ type: "message", message: { role: "assistant", content: [toolCall(ASK_SUPERVISOR_TOOL)] } });
+    pi.flags.pending = true;
+    expect((await pi.ask({ question: "Which table?" })).content[0].text).toContain("a message is queued for you");
+    expect(pi.entries.filter((entry) => entry.customType === "factory-question")).toEqual([]);
+
+    pi.flags.pending = false;
+    expect(await pi.ask({ question: "Which table?" })).toMatchObject({ terminate: true });
+    expect(pi.entries.at(-1)).toEqual({ customType: "factory-state", data: { state: "waiting_answer", round: 2, reason: "question" } });
   });
 });

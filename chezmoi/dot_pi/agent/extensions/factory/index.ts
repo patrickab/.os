@@ -16,7 +16,7 @@
  *   is merged after it and the task ends `blocked`/`stopped`. The merge is not awaited there: Pi defers every prompt,
  *   `/factory cancel` included, until the `agent_settled` handlers return
  * - `factory.yaml` and the role prompts come from a commit of the target branch (the task's base, `taskBase`, at the
- *   run's start), never from the tree the coder edits
+ *   run's start; a merge request's target tip), never from the tree the coder edits
  * - A task runs in a git worktree of its own, on its own branch, made off `settings.branch` by whoever starts it. It
  *   stays up to date with that branch and merges into it: a run that opens commits the worktree and rebases it onto
  *   the branch. A conflicting rebase is aborted and the run opens with a `conflict` round instead, so does a rebase
@@ -84,6 +84,14 @@ function lastAssistantText(entries: Iterable<{ type: string }>): string {
   return text;
 }
 
+/**
+ * The context types the session manager read-only, but Pi passes its session manager itself: the only way to a
+ * message without a turn. A Pi that does not leaves `appendMessage` undefined.
+ */
+function writableSessionManager(ctx: ExtensionContext): Partial<Pick<SessionManager, "appendMessage">> {
+  return ctx.sessionManager as Partial<Pick<SessionManager, "appendMessage">>;
+}
+
 function isMergedTask(snapshot: Snapshot): boolean {
   return snapshot.state === "done" && snapshot.reason.startsWith("merged");
 }
@@ -136,11 +144,11 @@ export default function (pi: ExtensionAPI) {
     appendEntry: (customType, data) => pi.appendEntry(customType, data),
     sendUserMessage: (text) => pi.sendUserMessage(text),
     recordRequest: (text) => {
-      // The context types it read-only, but Pi passes its session manager itself: the only way to a message without a turn.
-      const manager = ctx.sessionManager as Partial<Pick<SessionManager, "appendMessage">>;
+      const manager = writableSessionManager(ctx);
       if (typeof manager.appendMessage !== "function") throw new Error("this Pi cannot record a message without a turn");
       manager.appendMessage({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() });
     },
+    canRecordRequest: () => typeof writableSessionManager(ctx).appendMessage === "function",
     sendMessage: (message, options) => pi.sendMessage(message, options),
     setStatus: (key, text) => ctx.ui.setStatus(key, text),
     isIdle: () => ctx.isIdle(),

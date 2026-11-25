@@ -13,9 +13,9 @@
  *   the `factory-commit-message` entry and the state the round passed into
  * - Provides `runMergeRequest`: the pipeline of a merge request, which has no coder. Its branch is rebased onto the
  *   target (`MergeRequestSteps.rebase`, unsquashed), the gates run, the reviewer reviews the whole diff whatever
- *   `settings.review` says, then it passes into `merging` or the wait for approve. Nothing opens a round: a rejected
- *   review, a conflict or a failed gate ends it `blocked` (`review_rejected`, `conflict`, `gates`), and so does a
- *   conflict or a failed merge gate in its `runMerge`
+ *   `settings.review` says, then it passes into `merging` or the wait for approve. Nothing opens a round: uncommitted
+ *   changes in its worktree, a rejected review, a conflict or a failed gate end it `blocked` (`dirty`,
+ *   `review_rejected`, `conflict`, `gates`), and so does a conflict or a failed merge gate in its `runMerge`
  * - A hook or gate that exits `INFRA_EXIT` (75, EX_TEMPFAIL) says the environment is broken, not the change: the task
  *   ends `blocked`, `infra: <last output line>`, without feedback to the coder. A retry starts the next round once it is fixed
  */
@@ -64,6 +64,8 @@ export interface PipelineSteps {
 }
 
 export interface MergeRequestSteps extends PipelineSteps {
+  /** True when the worktree holds uncommitted changes (untracked files included, ignored ones not). */
+  dirty(): Promise<boolean>;
   /** Rebases the branch onto the target without squashing it: the conflicting files, null when it went clean. */
   rebase(): Promise<string[] | null>;
 }
@@ -159,6 +161,8 @@ export async function runMergeRequest(snapshot: Snapshot, steps: MergeRequestSte
   const end = (state: State, reason: string): Draft[] => [...drafts, stateDraft(state, round, reason)];
   try {
     const config = steps.config();
+    // Only the source's commits are reviewed and merged: what lies uncommitted is never committed for them.
+    if (await steps.dirty()) return end("blocked", "dirty");
     steps.status(`round ${round}: rebase onto ${task.mainBranch}`);
     const conflicts = await steps.rebase();
     if (steps.cancelled()) return end("cancelled", "cancelled");

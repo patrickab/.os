@@ -108,6 +108,7 @@ function session(cwd: string, branch: Entry[] = []) {
     tools,
     messages,
     requests,
+    sessionManager: ctx.sessionManager as Partial<typeof ctx.sessionManager>,
     sent,
     notes,
     statuses,
@@ -790,5 +791,110 @@ echo "{\\"type\\":\\"tool_execution_end\\",\\"toolName\\":\\"submit_verdict\\",\
     expect(pi.of("factory-round").at(-1)).toEqual({ round: 2, trigger: "retry" });
     expect(gitIn(repo, "log", "--format=%s", "main")).toBe("feat: wave two\nfeat: wave one\nbase");
     expect([pi.messages, pi.sent]).toEqual([[], []]);
+  });
+
+  test("a retry is held to the target's current gates, not to those of the commit the source forked from (M1)", async () => {
+    const worktree = waveWorktree();
+    writeFileSync(join(repo, "wave.txt"), "main's own\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "main wave.txt");
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("blocked/conflict");
+    // The conflict goes away on main, which meanwhile gains a gate the wave fails.
+    gitIn(repo, "rm", "--quiet", "wave.txt");
+    writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [test, -f, must-exist.txt]\n");
+    gitIn(repo, "commit", "--quiet", "-am", "drop wave.txt, new gate");
+    const main = gitIn(repo, "rev-parse", "main");
+    await pi.command("retry");
+    await pi.until("blocked/gates");
+    expect(pi.of("factory-gate")).toEqual([expect.objectContaining({ argv: ["test", "-f", "must-exist.txt"], exitCode: 1 })]);
+    expect(gitIn(repo, "rev-parse", "main")).toBe(main);
+  });
+
+  test("uncommitted files in its worktree block it as dirty: nothing is committed to the source or merged (m2)", async () => {
+    const worktree = waveWorktree();
+    const wave = gitIn(repo, "rev-parse", "wave");
+    writeFileSync(join(worktree, "generated.txt"), "generated\n");
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("blocked/dirty");
+    expect(pi.of("factory-gate")).toEqual([]);
+    expect([gitIn(repo, "rev-parse", "wave"), gitIn(repo, "log", "--format=%s", "main")]).toEqual([wave, "base"]);
+    expect(gitIn(worktree, "status", "--porcelain")).toBe("?? generated.txt");
+  });
+
+  test("a file a gate leaves behind is not committed by its merge: main gets the source's commits only (m2)", async () => {
+    writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [sh, -c, 'echo x > gate-output.txt']\n");
+    gitIn(repo, "commit", "--quiet", "-am", "gate writes a file");
+    const worktree = waveWorktree();
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("done/merged");
+    expect(gitIn(repo, "log", "--format=%s", "main")).toBe("feat: wave two\nfeat: wave one\ngate writes a file\nbase");
+    expect(gitIn(worktree, "status", "--porcelain")).toBe("?? gate-output.txt");
+  });
+
+  test("a Pi that cannot record the request fails the start before anything is recorded; a later start is not refused (m4)", async () => {
+    const pi = session(waveWorktree());
+    delete pi.sessionManager.appendMessage;
+    await startMergeRequest(pi);
+    expect(pi.notes).toEqual(["error: factory: this Pi cannot record a message without a turn, which a merge request needs"]);
+    expect([pi.entries, pi.requests]).toEqual([[], []]);
+    await startMergeRequest(pi);
+    expect(pi.notes.at(-1)).not.toContain("already holds a task");
+  });
+
+  test("a target checked out nowhere is moved by ref, the primary checkout untouched (m7)", async () => {
+    gitIn(repo, "branch", "release", "main");
+    const worktree = waveWorktree();
+    const pi = session(worktree);
+    await startMergeRequest(pi, { branch: "release" });
+    await pi.until("done/merged");
+    expect(gitIn(repo, "log", "--format=%s", "release")).toBe("feat: wave two\nfeat: wave one\nbase");
+    expect([gitIn(repo, "log", "--format=%s", "main"), gitIn(repo, "symbolic-ref", "--short", "HEAD"), gitIn(repo, "status", "--porcelain")]).toEqual(["base", "main", ""]);
+  });
+
+  test("a target checked out in another worktree is fast-forwarded there (m7)", async () => {
+    const releaseCheckout = join(scratch, `release-${counter}`);
+    gitIn(repo, "worktree", "add", "--quiet", "-b", "release", releaseCheckout, "main");
+    const pi = session(waveWorktree());
+    await startMergeRequest(pi, { branch: "release" });
+    await pi.until("done/merged");
+    expect(gitIn(releaseCheckout, "log", "--format=%s")).toBe("feat: wave two\nfeat: wave one\nbase");
+    expect([readFileSync(join(releaseCheckout, "more.txt"), "utf8"), gitIn(releaseCheckout, "status", "--porcelain")]).toEqual(["more\n", ""]);
+    expect(gitIn(repo, "log", "--format=%s", "main")).toBe("base");
+  });
+
+  test("a cancel while its pipeline runs ends it cancelled, main unmoved (m7)", async () => {
+    writeFileSync(join(repo, "factory.yaml"), "gates:\n  - [sleep, '20']\n");
+    gitIn(repo, "commit", "--quiet", "-am", "slow gate");
+    const main = gitIn(repo, "rev-parse", "main");
+    const pi = session(waveWorktree());
+    const started = Date.now();
+    await startMergeRequest(pi);
+    while (!pi.statuses.some(([, text]) => text?.includes("gates sleep"))) await Bun.sleep(20);
+    await pi.command("cancel");
+    await pi.until("cancelled/cancelled");
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(gitIn(repo, "rev-parse", "main")).toBe(main);
+  });
+
+  test("a retry discards a rebase a person left in progress in its worktree, as the README says (m1, m7)", async () => {
+    const worktree = waveWorktree();
+    const wave = gitIn(repo, "rev-parse", "wave");
+    writeFileSync(join(repo, "wave.txt"), "main's own\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "main wave.txt");
+    const pi = session(worktree);
+    await startMergeRequest(pi);
+    await pi.until("blocked/conflict");
+    expect(() => gitIn(worktree, "rebase", "main")).toThrow();
+    writeFileSync(join(worktree, "wave.txt"), "resolved by hand\n");
+    gitIn(worktree, "add", "wave.txt");
+    await pi.command("retry");
+    await pi.until("blocked/conflict");
+    expect(pi.of("factory-round").at(-1)).toEqual({ round: 2, trigger: "retry" });
+    expect([readFileSync(join(worktree, "wave.txt"), "utf8"), gitIn(worktree, "status", "--porcelain"), gitIn(repo, "rev-parse", "wave")]).toEqual(["hello\n", "", wave]);
   });
 });
