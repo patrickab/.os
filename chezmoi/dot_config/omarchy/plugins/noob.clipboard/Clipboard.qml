@@ -331,7 +331,7 @@ Item {
       height: root.cardHeight
       radius: root.cornerRadius
       anchors.centerIn: parent
-      color: "transparent"
+      color: root.background
       borderSpec: root.borderSpec
       padding: root.contentMargin
 
@@ -621,7 +621,7 @@ Item {
     Rectangle {
       anchors.fill: parent
       radius: root.cornerRadius
-      color: Qt.rgba(0, 0, 0, 0.18)
+      color: root.background
     }
   }
 }
